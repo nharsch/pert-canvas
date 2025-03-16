@@ -17,6 +17,7 @@
  :builds
  {:frontend
   {:target :browser
+   :infer-externs false
    :modules {:main {:init-fn pert-canvas.ui.app/init}}
    ;; :devtools
    }}}
