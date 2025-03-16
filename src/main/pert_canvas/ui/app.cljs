@@ -18,14 +18,24 @@
            {:id "3"
             :position {:x 100 :y 200}
             :data {:label "Node 3"}}
+           {:id "4"
+            :position {:x 200 :y 100}
+            :data {:label "Node 4"}}
+           {:id "5"
+            :position {:x 200 :y 0}
+            :data {:label "Node 5"}}
            ]
    :edges [
            {:id 1 :source "1" :target "2"}
            {:id 2 :source "2" :target "3"}
+           {:id 3 :source "2" :target "4"}
+           {:id 4 :source "3" :target "5"}
            ]})
-(comment
-  (-> (new (.. Dagre -graphlib -Graph))
-      (.setDefaultEdgeLabel (fn [] #js {}))))
+
+(defn add-source-position-lr [node]
+                       (merge node {:sourcePosition "right"
+                                    :targetPosition "left"}))
+
 
 (get-in {:id 0} [:measured :width] 0)
 
@@ -60,7 +70,7 @@
   ($ :div {:style {:height "60vh" :width "100%"}}
    ($ :h1 nil "Hello, world!")
    ($ :div {:style {:height "60vh"}}
-      ($ ReactFlow (clj->js (get-layouted-elements (:nodes initial-state) (:edges initial-state)))
+      ($ ReactFlow (clj->js (get-layouted-elements (map add-source-position-lr (:nodes initial-state)) (:edges initial-state)))
          ($ Background nil)
          ($ Controls nil)))))
 
