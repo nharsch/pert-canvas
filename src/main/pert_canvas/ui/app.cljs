@@ -6,6 +6,7 @@
             ;; [reaflow :refer [Canvas]]
             ["@xyflow/react" :refer [ReactFlow Background Controls]]
             ["@dagrejs/dagre" :as Dagre]
+            ["@mui/x-data-grid" :refer [DataGrid]]
             ))
 
 (def initial-state
@@ -68,11 +69,19 @@
 
 (defui app []
   ($ :div {:style {:height "60vh" :width "100%"}}
-   ($ :h1 nil "Hello, world!")
-   ($ :div {:style {:height "60vh"}}
-      ($ ReactFlow (clj->js (get-layouted-elements (map add-source-position-lr (:nodes initial-state)) (:edges initial-state)))
-         ($ Background nil)
-         ($ Controls nil)))))
+     ($ :h1 nil "Hello, world!")
+     ($ :div {:style {:height "60vh"}}
+        ($ ReactFlow (clj->js (get-layouted-elements (map add-source-position-lr (:nodes initial-state)) (:edges initial-state)))
+           ($ Background nil)
+           ($ Controls nil)))
+     ($ :div {:style {:display "block"
+                      :height "40vh"
+                      :width "100%"}}
+        ($ DataGrid {:rows (clj->js (map (fn [node]
+                                           (assoc node :id (str (:id node))))
+                                         (:nodes initial-state)))
+                     :columns (clj->js [{:field "id" :headerName "ID" :width 100}
+                                        {:field "data.label" :headerName "Label" :width 200}])}))))
 
 
 (defonce root
