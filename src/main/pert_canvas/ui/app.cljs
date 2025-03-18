@@ -1,41 +1,59 @@
 (ns pert-canvas.ui.app
   (:require [uix.core :as uix :refer [defui $]]
             [uix.dom]
-            ;; [uix.re-frame :as urf]
-            ;; [reagent.core :as r]
-            ;; [reaflow :refer [Canvas]]
+            [uix.re-frame :as urf]
+            [reagent.core :as r]
+            [clojure.string :as str]
             ["@xyflow/react" :refer [ReactFlow Background Controls]]
             ["@dagrejs/dagre" :as Dagre]
             ["@mui/x-data-grid" :refer [DataGrid]]
             ))
 
 (def initial-state
-  {:nodes [{:id "1"
-            :position {:x 0 :y 0}
-            :data {:label "Node 1"}}
+  {:nodes [
+           {:id "1"
+            :label "Node 1"
+            :description "Node 1 description"}
            {:id "2"
-            :position {:x 0 :y 100}
-            :data {:label "Node 2"}}
+            :label "Node 2"
+            :description "Node 2 description"
+            :dependencies ["1"]}
            {:id "3"
-            :position {:x 100 :y 200}
-            :data {:label "Node 3"}}
+            :label "Node 3"
+            :description "Node 3 description"
+            :dependencies ["2"]}
            {:id "4"
-            :position {:x 200 :y 100}
-            :data {:label "Node 4"}}
+            :label "Node 4"
+            :description "Node 4 description"
+            :dependencies ["2"]}
            {:id "5"
-            :position {:x 200 :y 0}
-            :data {:label "Node 5"}}
+            :label "Node 5"
+            :description "Node 5 description"
+            :dependencies ["3"]}
+           {:id "6"
+            :label "Node 6"
+            :description "Node 6 description"
+            :dependencies ["4" "5"]}
            ]
-   :edges [
-           {:id 1 :source "1" :target "2"}
-           {:id 2 :source "2" :target "3"}
-           {:id 3 :source "2" :target "4"}
-           {:id 4 :source "3" :target "5"}
-           ]})
+   })
 
-(defn add-source-position-lr [node]
-                       (merge node {:sourcePosition "right"
-                                    :targetPosition "left"}))
+(defn state-node->canvas-node [state-node]
+  {:id (:id state-node)
+   :position {:x 0 :y 0}
+   :sourcePosition "right"
+   :targetPosition "left"
+   :data {:label (:label state-node)
+          :description (:description state-node)}})
+
+(defn state-nodes->canvas-edges [nodes]
+  ; for each node, for each of its dependencies, create an edge from the dependency to the node
+    (mapcat (fn [node]
+                (map (fn [dependency]
+                     {:id (str "edge-" (:id node) "-" dependency)
+                        :source dependency
+                        :target (:id node)})
+                     (:dependencies node)))
+            nodes))
 
 
 (get-in {:id 0} [:measured :width] 0)
@@ -67,21 +85,30 @@
                  nodes)
      :edges edges}))
 
+(.-dependencies (clj->js (nth (:nodes initial-state) 4)))
+
+ ; TODO: is there a simpler way to get reactive state? https://github.com/pitch-io/uix/blob/master/docs/interop-with-reagent.md#syncing-with-ratoms-and-re-frame
+(def state-atom (r/atom initial-state))
 (defui app []
-  ($ :div {:style {:height "60vh" :width "100%"}}
-     ($ :h1 nil "Hello, world!")
-     ($ :div {:style {:height "60vh"}}
-        ($ ReactFlow (clj->js (get-layouted-elements (map add-source-position-lr (:nodes initial-state)) (:edges initial-state)))
-           ($ Background nil)
-           ($ Controls nil)))
-     ($ :div {:style {:display "block"
-                      :height "40vh"
-                      :width "100%"}}
-        ($ DataGrid {:rows (clj->js (map (fn [node]
-                                           (assoc node :id (str (:id node))))
-                                         (:nodes initial-state)))
-                     :columns (clj->js [{:field "id" :headerName "ID" :width 100}
-                                        {:field "data.label" :headerName "Label" :width 200}])}))))
+  (let [state (urf/use-reaction state-atom)]
+    ($ :div {:style {:height "60vh" :width "100%"}}
+       ($ :h1 nil "PERT Canvas")
+       ($ :div {:style {:height "50vh"}}
+          ($ ReactFlow (clj->js (get-layouted-elements (map state-node->canvas-node (:nodes state))
+                                                       (state-nodes->canvas-edges (:nodes state))))
+             ($ Background nil)
+             ($ Controls nil)))
+       ($ :div {:style {:display "block"
+                        :height "50vh"
+                        :width "100%"}}
+          ($ DataGrid {:rows (clj->js (:nodes state))
+                       :columns (clj->js [{:field "id" :headerName "ID" :width 100}
+                                          {:field "label" :headerName "Label" :width 200}
+                                          {:field "description" :headerName "Description" :width 300}
+                                          {:field "dependencies" :headerName "Dependencies" :width 300
+                                           :valueGetter (fn [_, row] (str/join ", " (.. row -dependencies)))}
+                                          ])}
+             )))))
 
 
 (defonce root
