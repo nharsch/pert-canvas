@@ -87,8 +87,36 @@
 
 (.-dependencies (clj->js (nth (:nodes initial-state) 4)))
 
- ; TODO: is there a simpler way to get reactive state? https://github.com/pitch-io/uix/blob/master/docs/interop-with-reagent.md#syncing-with-ratoms-and-re-frame
+(defn get-row-by-id [id nodes]
+  (->> nodes
+       (filter #(= id (:id %)))
+       (first)))
+
+(defn get-name-for-id [id nodes]
+  (->> nodes
+       (filter #(= id (:id %)))
+       (map :label)
+       (first)))
+
+(get-name-for-id "2" (:nodes initial-state))
+
+
+                                        ; TODO: is there a simpler way to get reactive state? https://github.com/pitch-io/uix/blob/master/docs/interop-with-reagent.md#syncing-with-ratoms-and-re-frame
 (def state-atom (r/atom initial-state))
+
+(defn handle-row-update [row]
+  (let [clj-row (js->clj row :keywordize-keys true)]
+    (print @state-atom)
+    (swap! state-atom update-in [:nodes] (fn [nodes] (map #(if (= (:id %) (:id clj-row)) clj-row %) nodes)))
+    ; return updated row
+    (clj->js (get-row-by-id (:id clj-row) (:nodes @state-atom)))))
+
+(def columns [{:field "id" :headerName "ID" :width 100}
+              {:field "label" :headerName "Label" :editable true :width 200}
+              {:field "description" :headerName "Description" :editable true :width 300}
+              {:field "dependencies" :headerName "Dependencies" :editable false :width 300
+               :valueGetter (fn [_, row] (str/join ", " (map #(get-name-for-id % (:nodes @state-atom)) (.. row -dependencies))))}])
+
 (defui app []
   (let [state (urf/use-reaction state-atom)]
     ($ :div {:style {:height "60vh" :width "100%"}}
@@ -102,12 +130,11 @@
                         :height "50vh"
                         :width "100%"}}
           ($ DataGrid {:rows (clj->js (:nodes state))
-                       :columns (clj->js [{:field "id" :headerName "ID" :width 100}
-                                          {:field "label" :headerName "Label" :width 200}
-                                          {:field "description" :headerName "Description" :width 300}
-                                          {:field "dependencies" :headerName "Dependencies" :width 300
-                                           :valueGetter (fn [_, row] (str/join ", " (.. row -dependencies)))}
-                                          ])}
+                       :columns (clj->js columns)
+                       ;; :processRowUpdate (fn [row] (swap! state-atom update-in [:nodes] (fn [nodes] (map #(if (= (:id %) (:id row)) row %) nodes))))
+                       :processRowUpdate handle-row-update
+                       :onProcessRowUpdateError (fn [error] (print error))
+                       }
              )))))
 
 
@@ -116,5 +143,5 @@
 
 
 (defn ^:dev/after-load init []
-  (js/console.log "Hello, world!")
+  (print "Hello, world!")
   (uix.dom/render-root ($ app) root))

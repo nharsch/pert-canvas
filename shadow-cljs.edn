@@ -17,7 +17,8 @@
  :builds
  {:frontend
   {:target :browser
-   :infer-externs true
+   :compiler-options {:infer-externs true
+                      :source-map true}
    :modules {:main {:init-fn pert-canvas.ui.app/init}}
    ;; :devtools
    }}}
