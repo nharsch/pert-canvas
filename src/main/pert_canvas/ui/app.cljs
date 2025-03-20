@@ -10,7 +10,7 @@
             ))
 
 (def initial-state
-  {:nodes [
+  {:tasks [
            {:id "1"
             :label "Node 1"
             :description "Node 1 description"}
@@ -35,9 +35,12 @@
             :description "Node 6 description"
             :dependencies ["4" "5"]}
            ]
+   :selectedTask nil
    })
 
-(defn state-node->canvas-node [state-node]
+(def state-atom (r/atom initial-state))
+
+(defn state-tasks->canvas-nodes [state-node]
   {:id (:id state-node)
    :position {:x 0 :y 0}
    :sourcePosition "right"
@@ -45,47 +48,15 @@
    :data {:label (:label state-node)
           :description (:description state-node)}})
 
-(defn state-nodes->canvas-edges [nodes]
+(defn state-tasks-to-canvas-edges [tasks]
   ; for each node, for each of its dependencies, create an edge from the dependency to the node
-    (mapcat (fn [node]
+    (mapcat (fn [task]
                 (map (fn [dependency]
-                     {:id (str "edge-" (:id node) "-" dependency)
+                     {:id (str "edge-" (:id task) "-" dependency)
                         :source dependency
-                        :target (:id node)})
-                     (:dependencies node)))
-            nodes))
-
-
-(get-in {:id 0} [:measured :width] 0)
-
-;; TODO: move to ui/layout.cljs
-(defn get-layouted-elements [nodes edges]
-  (let [g (-> (new (.. Dagre -graphlib -Graph))
-              (.setDefaultEdgeLabel (fn [] #js {})))]
-    (.setGraph g #js {:rankdir "LR"})
-
-    (doseq [edge edges]
-      (.setEdge g (:source edge) (:target edge)))
-
-    (doseq [node nodes]
-      (.setNode g (:id node)
-                (clj->js (merge node
-                                {:width (get-in node [:measured :width] 150)
-                                 :height (get-in node [:measured :height] 0)}))))
-
-    (.layout Dagre g)
-
-    {:nodes (map (fn [node]
-                   (let [position (.node g (:id node))
-                         width (get-in node [:measured :width] 150)
-                         height (get-in node [:measured :height] 0)
-                         x (- (.-x position) (/ width 2))
-                         y (- (.-y position) (/ height 2))]
-                     (assoc node :position {:x x :y y})))
-                 nodes)
-     :edges edges}))
-
-(.-dependencies (clj->js (nth (:nodes initial-state) 4)))
+                        :target (:id task)})
+                     (:dependencies task)))
+            tasks))
 
 (defn get-row-by-id [id nodes]
   (->> nodes
@@ -98,38 +69,89 @@
        (map :label)
        (first)))
 
-(get-name-for-id "2" (:nodes initial-state))
+;; TODO: move to ui/layout.cljs
+(defn get-layouted-nodes [nodes edges]
+  (let [g (-> (new (.. Dagre -graphlib -Graph))
+              (.setDefaultEdgeLabel (fn [] #js {})))]
+    (.setGraph g #js {:rankdir "LR"})
+
+    (doseq [edge edges]
+      (.setEdge g (:source edge) (:target edge)))
+
+    (doseq [node nodes]
+      (.setNode g (:id node)
+                (clj->js (merge node
+                                {:width (get-in node [:measured :width] 150)
+                                 :height (get-in node [:measured :height] 0)}))))
+    (.layout Dagre g)
+    (map (fn [node]
+           (let [position (.node g (:id node))
+                 width (get-in node [:measured :width] 150)
+                 height (get-in node [:measured :height] 0)
+                 x (- (.-x position) (/ width 2))
+                 y (- (.-y position) (/ height 2))]
+             (assoc node :position {:x x :y y})))
+         nodes)))
+
+(defn mark-selected-node [nodes]
+  (let [selected-task (:selectedTask @state-atom)]
+    (print selected-task)
+    (if selected-task
+      (map (fn [node]
+             (if (= (:id node) selected-task)
+               (merge node {:className "selected-node"
+                            :style {:border "2px solid #FF0000"}})
+               node))
+           nodes)
+      nodes)))
 
 
-                                        ; TODO: is there a simpler way to get reactive state? https://github.com/pitch-io/uix/blob/master/docs/interop-with-reagent.md#syncing-with-ratoms-and-re-frame
-(def state-atom (r/atom initial-state))
+(defn on-node-hover [_ node]
+  (cond (not (= (.-id node) (:selectedTask @state-atom)))
+    (swap! state-atom update :selectedTask (fn [_] (.-id node))))
+  )
+
+(defn on-node-leave [_ node]
+  (swap! state-atom update :selectedTask (fn [_] nil)))
 
 (defn handle-row-update [row]
   (let [clj-row (js->clj row :keywordize-keys true)]
     (print @state-atom)
-    (swap! state-atom update-in [:nodes] (fn [nodes] (map #(if (= (:id %) (:id clj-row)) clj-row %) nodes)))
+    (swap! state-atom update-in [:tasks] (fn [tasks] (map #(if (= (:id %) (:id clj-row)) clj-row %) tasks)))
     ; return updated row
-    (clj->js (get-row-by-id (:id clj-row) (:nodes @state-atom)))))
+    (clj->js (get-row-by-id (:id clj-row) (:tasks @state-atom)))))
 
 (def columns [{:field "id" :headerName "ID" :width 100}
               {:field "label" :headerName "Label" :editable true :width 200}
               {:field "description" :headerName "Description" :editable true :width 300}
               {:field "dependencies" :headerName "Dependencies" :editable false :width 300
-               :valueGetter (fn [_, row] (str/join ", " (map #(get-name-for-id % (:nodes @state-atom)) (.. row -dependencies))))}])
+               :valueGetter (fn [_, row] (str/join ", " (map #(get-name-for-id % (:tasks @state-atom)) (.. row -dependencies))))}])
+
+
 
 (defui app []
   (let [state (urf/use-reaction state-atom)]
     ($ :div {:style {:height "60vh" :width "100%"}}
        ($ :h1 nil "PERT Canvas")
+       ($ :p nil "Active task is " (:selectedTask state))
        ($ :div {:style {:height "50vh"}}
-          ($ ReactFlow (clj->js (get-layouted-elements (map state-node->canvas-node (:nodes state))
-                                                       (state-nodes->canvas-edges (:nodes state))))
+          ($ ReactFlow (clj->js
+                        ; TODO: clean this up
+                        {:nodes (as-> (:tasks state) val
+                                  (map state-tasks->canvas-nodes val)
+                                  (get-layouted-nodes val (state-tasks-to-canvas-edges (:tasks state)))
+                                  (mark-selected-node val))
+                         :edges (state-tasks-to-canvas-edges (:tasks state))
+                         :onNodeClick on-node-hover
+                         ;; :onNodeMouseLeave on-node-leave
+                         :fitView true
+                         })
              ($ Background nil)
              ($ Controls nil)))
        ($ :div {:style {:display "block"
                         :height "50vh"
                         :width "100%"}}
-          ($ DataGrid {:rows (clj->js (:nodes state))
+          ($ DataGrid {:rows (clj->js (:tasks state))
                        :columns (clj->js columns)
                        ;; :processRowUpdate (fn [row] (swap! state-atom update-in [:nodes] (fn [nodes] (map #(if (= (:id %) (:id row)) row %) nodes))))
                        :processRowUpdate handle-row-update
