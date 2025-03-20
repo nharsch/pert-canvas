@@ -93,17 +93,17 @@
              (assoc node :position {:x x :y y})))
          nodes)))
 
-(defn mark-selected-node [nodes]
-  (let [selected-task (:selectedTask @state-atom)]
-    (print selected-task)
-    (if selected-task
-      (map (fn [node]
-             (if (= (:id node) selected-task)
-               (merge node {:className "selected-node"
-                            :style {:border "2px solid #FF0000"}})
-               node))
-           nodes)
-      nodes)))
+(def mark-selected-node
+  (memoize
+   (fn [nodes selected-task]
+     (if selected-task
+       (map (fn [node]
+              (if (= (:id node) selected-task)
+                (merge node {:className "selected-node"
+                             :style {:border "2px solid #FF0000"}})
+                node))
+            nodes)
+       nodes))))
 
 
 (defn on-node-hover [_ node]
@@ -116,10 +116,11 @@
 
 (defn handle-row-update [row]
   (let [clj-row (js->clj row :keywordize-keys true)]
-    (print @state-atom)
+    ;; (print @state-atom)
     (swap! state-atom update-in [:tasks] (fn [tasks] (map #(if (= (:id %) (:id clj-row)) clj-row %) tasks)))
     ; return updated row
     (clj->js (get-row-by-id (:id clj-row) (:tasks @state-atom)))))
+
 
 (def columns [{:field "id" :headerName "ID" :width 100}
               {:field "label" :headerName "Label" :editable true :width 200}
@@ -130,20 +131,25 @@
 
 
 (defui app []
-  (let [state (urf/use-reaction state-atom)]
+  (let [
+        state (urf/use-reaction state-atom)
+        canvas-edges (state-tasks-to-canvas-edges (:tasks state))
+        canvas-nodes (as-> (:tasks state) val
+                                  (map state-tasks->canvas-nodes val)
+                                  (get-layouted-nodes val canvas-edges)
+                                  (mark-selected-node val (:selectedTask state)))
+        ]
     ($ :div {:style {:height "60vh" :width "100%"}}
        ($ :h1 nil "PERT Canvas")
        ($ :p nil "Active task is " (:selectedTask state))
        ($ :div {:style {:height "50vh"}}
           ($ ReactFlow (clj->js
                         ; TODO: clean this up
-                        {:nodes (as-> (:tasks state) val
-                                  (map state-tasks->canvas-nodes val)
-                                  (get-layouted-nodes val (state-tasks-to-canvas-edges (:tasks state)))
-                                  (mark-selected-node val))
-                         :edges (state-tasks-to-canvas-edges (:tasks state))
-                         :onNodeClick on-node-hover
-                         ;; :onNodeMouseLeave on-node-leave
+                        {:nodes canvas-nodes
+                         :edges canvas-edges
+                         :onNodeMouseEnter on-node-hover
+                         :onNodeMouseLeave on-node-leave
+                         ;; :onNodesChange (fn [nodes] (print nodes))
                          :fitView true
                          })
              ($ Background nil)
