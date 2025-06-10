@@ -1,5 +1,5 @@
 (ns pert-canvas.ui.app
-  (:require [uix.core :as uix :refer [defui $]]
+  (:require [uix.core :as uix :refer [defui defhook $]]
             [uix.dom]
             [uix.re-frame :as urf]
             [reagent.core :as r]
@@ -11,30 +11,30 @@
 
 (def initial-tasks
   [
-           {:id "1"
-            :label "Node 1"
-            :description "Node 1 description"}
-           {:id "2"
-            :label "Node 2"
-            :description "Node 2 description"
-            :dependencies ["1"]}
-           {:id "3"
-            :label "Node 3"
-            :description "Node 3 description"
-            :dependencies ["2"]}
-           {:id "4"
-            :label "Node 4"
-            :description "Node 4 description"
-            :dependencies ["2"]}
-           {:id "5"
-            :label "Node 5"
-            :description "Node 5 description"
-            :dependencies ["3"]}
-           {:id "6"
-            :label "Node 6"
-            :description "Node 6 description"
-            :dependencies ["4" "5"]}
-           ])
+   {:id "1"
+    :label "Node 1"
+    :description "Node 1 description"}
+   {:id "2"
+    :label "Node 2"
+    :description "Node 2 description"
+    :dependencies ["1"]}
+   {:id "3"
+    :label "Node 3"
+    :description "Node 3 description"
+    :dependencies ["2"]}
+   {:id "4"
+    :label "Node 4"
+    :description "Node 4 description"
+    :dependencies ["2"]}
+   {:id "5"
+    :label "Node 5"
+    :description "Node 5 description"
+    :dependencies ["3"]}
+   {:id "6"
+    :label "Node 6"
+    :description "Node 6 description"
+    :dependencies ["4" "5"]}
+   ])
 
 
 
@@ -182,9 +182,38 @@
          :onNodeMouseLeave on-node-leave
          :onConnect handle-connect
          :onEdgesChange handle-edge-selection
+         :onEdgesDelete (fn [event] (println "on delete: " event))
          :fitView true
          }))
      )))
+
+(defn handle-delete []
+  (let [selected-task (:selectedTask @state-atom)
+        selected-edge (:selectedEdge @state-atom)]
+    (when selected-task
+      (swap! state-atom update :tasks
+             (fn [tasks]
+               (remove #(= (:id %) selected-task) tasks)))
+      (swap! state-atom update :calculated-nodes
+             (fn [nodes]
+               (remove #(= (:id %) selected-task) nodes)))
+      (swap! state-atom update :calculated-edges
+             (fn [edges]
+               (remove #(or (= (:source %) selected-task)
+                            (= (:target %) selected-task)) edges)))
+      (swap! state-atom update :selectedTask (fn [_] nil)))
+    (when selected-edge
+      (let [[source-id target-id] (edgeid->ids selected-edge)]
+        (swap! state-atom update :tasks
+               (fn [tasks]
+                 (map #(if (= (:id %) source-id)
+                         (remove-dep-from-row target-id %)
+                         %) tasks)))
+        (swap! state-atom update :calculated-edges
+               (fn [edges]
+                 (remove #(= (:id %) selected-edge) edges)))
+        (swap! state-atom update :selectedEdge (fn [_] nil))))))
+
 
 (def columns [{:field "id" :headerName "ID" :width 100}
               {:field "label" :headerName "Label" :editable true :width 200}
@@ -193,10 +222,21 @@
                :valueGetter (fn [_, row] (str/join ", " (map #(get-name-for-id % (:tasks @state-atom)) (.. row -dependencies))))
                :valueSetter (fn [val, row]
                               (merge (get-row-by-id (.. row -id) (:tasks @state-atom))
-                                     {:dependencies (parse-dependencies val (:tasks @state-atom))}))}
-              ])
+                                     {:dependencies (parse-dependencies val (:tasks @state-atom))}))}])
 
 (defui app []
+  (uix/use-effect
+   (fn []
+     (let [handle-keydown (fn [event]
+                            (when (or (= (.-key event) "Delete")
+                                      (= (.-key event) "Backspace"))
+                              (.preventDefault event)
+                              (handle-delete)))]
+       (.addEventListener js/document "keydown" handle-keydown)
+       ;; Cleanup function
+       #(.removeEventListener js/document "keydown" handle-keydown)))
+   [handle-delete])
+
   (let [selected-task (urf/use-reaction (r/cursor state-atom [:selectedTask]))
         tasks (urf/use-reaction (r/cursor state-atom [:tasks]))]
     ($ :div {:style {:height "60vh" :width "100%"}}
