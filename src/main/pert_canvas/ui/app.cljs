@@ -3,7 +3,6 @@
             [uix.dom]
             [uix.re-frame :as urf]
             [reagent.core :as r]
-            [reagent.ratom :as ra]
             [clojure.string :as str]
             ["@xyflow/react" :refer [ReactFlow Background Controls]]
             ["@dagrejs/dagre" :as Dagre]
@@ -113,6 +112,7 @@
    :calculated-nodes (tasks->canvas-nodes initial-tasks)
    :calculated-edges (tasks->canvas-edges initial-tasks)
    :selectedTask nil
+   :selectedEdge nil
    })
 
 (def state-atom (r/atom initial-state))
@@ -136,12 +136,39 @@
                                         ; return updated row
     (clj->js (get-row-by-id (:id clj-row) (:tasks @state-atom)))))
 
+(defn handle-connect [connection]
+  (print "handle-connect" connection)
+  (let [source-id (.-source connection)
+        target-id (.-target connection)]
+    (swap! state-atom update-in [:tasks]
+           (fn [tasks]
+             (map #(if (= (:id %) target-id)
+                     (update % :dependencies conj source-id)
+                     %) tasks)))
+    ;; return updated row
+    (clj->js (get-row-by-id target-id (:tasks @state-atom)))))
+
 (defn parse-dependencies [val tasks]
   (println "parse-dependencies" val)
   (let [names (str/split val #",\s*")]
     (mapv #(:id (get-row-by-name % tasks)) names)))
 
-(parse-dependencies "Node 1, Node 2" initial-tasks)
+(defn edgeid->ids [edge-id]
+  (let [[_ source-id target-id] (str/split edge-id #"-")]
+    [source-id target-id]))
+
+(defn remove-dep-from-row [dep-id row]
+  (let [dependencies (:dependencies row)]
+    (assoc row :dependencies (remove #(= % dep-id) dependencies))))
+
+(defn handle-edge-selection [edges]
+  (print "Edge selected" edges)
+  (print "edge id" (.-id (first edges)))
+  (let [edge (first edges)
+        [source-id target-id] (edgeid->ids (.-id edge))]
+    (print "source-id" source-id "target-id" target-id)
+                                        ; remove target from deps of source
+    (swap! state-atom update :selectedEdge (fn [_] (.-id edge)))))
 
 (def tasks->reactflow-config
   (memoize
@@ -153,7 +180,8 @@
          :edges edges
          :onNodeMouseEnter on-node-hover
          :onNodeMouseLeave on-node-leave
-         ;; :onNodesChange (fn [nodes] (println "nodes changed" nodes))
+         :onConnect handle-connect
+         :onEdgesChange handle-edge-selection
          :fitView true
          }))
      )))
@@ -169,10 +197,8 @@
               ])
 
 (defui app []
-  (let [
-        selected-task (urf/use-reaction (r/cursor state-atom [:selectedTask]))
-        tasks (urf/use-reaction (r/cursor state-atom [:tasks]))
-        ]
+  (let [selected-task (urf/use-reaction (r/cursor state-atom [:selectedTask]))
+        tasks (urf/use-reaction (r/cursor state-atom [:tasks]))]
     ($ :div {:style {:height "60vh" :width "100%"}}
        ($ :h1 nil "PERT Canvas")
        ($ :p nil "Active task is " selected-task " (hover over a node to select it)")
@@ -183,7 +209,8 @@
        ($ :div {:style {:display "block"
                         :height "50vh"
                         :width "100%"}}
-          ($ DataGrid {:rows (clj->js tasks)
+          ($ DataGrid {
+                       :rows (clj->js tasks)
                        :columns (clj->js columns)
                        :processRowUpdate handle-row-update
                        :onProcessRowUpdateError (fn [error] (print error))
