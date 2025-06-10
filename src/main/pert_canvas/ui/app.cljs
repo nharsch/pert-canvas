@@ -35,8 +35,7 @@
             :label "Node 6"
             :description "Node 6 description"
             :dependencies ["4" "5"]}
-           ]
-  )
+           ])
 
 
 
@@ -104,6 +103,11 @@
        (map :label)
        (first)))
 
+(defn get-row-by-name [name nodes]
+  (->> nodes
+       (filter #(= name (:label %)))
+       (first)))
+
 (def initial-state
   {:tasks initial-tasks
    :calculated-nodes (tasks->canvas-nodes initial-tasks)
@@ -115,26 +119,29 @@
 
 
 (defn on-node-hover [_ node]
-  (println "Node hovered: " (.-id node) "Selected task: " (:selectedTask @state-atom))
   (cond (not= (:selectedTask @state-atom) (.-id node))
     (swap! state-atom update :selectedTask (fn [_] (.-id node)))
-    )
-  )
-
-
-(defn on-node-leave [_ node]
-  (println "Node left: " (.-id node) "Selected task: " (:selectedTask @state-atom))
-  (cond (= (:selectedTask @state-atom) (.-id node))
-    (swap! state-atom update :selectedTask (fn [_] nil))
     ))
 
+(defn on-node-leave [_ node]
+  (cond (= (:selectedTask @state-atom) (.-id node))
+    (swap! state-atom update :selectedTask (fn [_] nil))))
+
 (defn handle-row-update [row]
+  (print "handle-row-update" row)
   (let [clj-row (js->clj row :keywordize-keys true)]
     (swap! state-atom update-in [:tasks]
-           (fn [tasks] (map #(if (= (:id %) (:id clj-row)) clj-row %) tasks)))
+           (fn [tasks]
+             (map #(if (= (:id %) (:id clj-row)) clj-row %) tasks)))
                                         ; return updated row
     (clj->js (get-row-by-id (:id clj-row) (:tasks @state-atom)))))
 
+(defn parse-dependencies [val tasks]
+  (println "parse-dependencies" val)
+  (let [names (str/split val #",\s*")]
+    (mapv #(:id (get-row-by-name % tasks)) names)))
+
+(parse-dependencies "Node 1, Node 2" initial-tasks)
 
 (def tasks->reactflow-config
   (memoize
@@ -146,7 +153,7 @@
          :edges edges
          :onNodeMouseEnter on-node-hover
          :onNodeMouseLeave on-node-leave
-         :onNodesChange (fn [nodes] (println "nodes changed" nodes))
+         ;; :onNodesChange (fn [nodes] (println "nodes changed" nodes))
          :fitView true
          }))
      )))
@@ -154,8 +161,12 @@
 (def columns [{:field "id" :headerName "ID" :width 100}
               {:field "label" :headerName "Label" :editable true :width 200}
               {:field "description" :headerName "Description" :editable true :width 300}
-              {:field "dependencies" :headerName "Dependencies" :editable false :width 300
-               :valueGetter (fn [_, row] (str/join ", " (map #(get-name-for-id % (:tasks @state-atom)) (.. row -dependencies))))}])
+              {:field "dependencies" :headerName "Dependencies" :editable true :width 300
+               :valueGetter (fn [_, row] (str/join ", " (map #(get-name-for-id % (:tasks @state-atom)) (.. row -dependencies))))
+               :valueSetter (fn [val, row]
+                              (merge (get-row-by-id (.. row -id) (:tasks @state-atom))
+                                     {:dependencies (parse-dependencies val (:tasks @state-atom))}))}
+              ])
 
 (defui app []
   (let [
@@ -174,11 +185,9 @@
                         :width "100%"}}
           ($ DataGrid {:rows (clj->js tasks)
                        :columns (clj->js columns)
-                       ;; :processRowUpdate (fn [row] (swap! state-atom update-in [:nodes] (fn [nodes] (map #(if (= (:id %) (:id row)) row %) nodes))))
                        :processRowUpdate handle-row-update
                        :onProcessRowUpdateError (fn [error] (print error))
-                       }
-             )))))
+                       })))))
 
 
 (defonce root
