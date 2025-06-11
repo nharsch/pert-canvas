@@ -212,7 +212,9 @@
         (swap! state-atom update :calculated-edges
                (fn [edges]
                  (remove #(= (:id %) selected-edge) edges)))
-        (swap! state-atom update :selectedEdge (fn [_] nil))))))
+        (swap! state-atom update :selectedEdge (fn [_] nil)))))
+  ; call other delete handlers if needed
+  )
 
 
 (def columns [{:field "id" :headerName "ID" :width 100}
@@ -230,7 +232,6 @@
      (let [handle-keydown (fn [event]
                             (when (or (= (.-key event) "Delete")
                                       (= (.-key event) "Backspace"))
-                              (.preventDefault event)
                               (handle-delete)))]
        (.addEventListener js/document "keydown" handle-keydown)
        ;; Cleanup function
