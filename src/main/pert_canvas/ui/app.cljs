@@ -109,8 +109,6 @@
 
 (def initial-state
   {:tasks initial-tasks
-   :calculated-nodes (tasks->canvas-nodes initial-tasks)
-   :calculated-edges (tasks->canvas-edges initial-tasks)
    :selectedTask nil
    :selectedEdge nil
    })
@@ -170,6 +168,14 @@
                                         ; remove target from deps of source
     (swap! state-atom update :selectedEdge (fn [_] (.-id edge)))))
 
+(defn handle-add-task []
+  (let [new-id (str (inc (count (:tasks @state-atom))))
+        new-task {:id new-id
+                  :label (str "Node " new-id)
+                  :description (str "Node " new-id " description")
+                  :dependencies []}]
+    (swap! state-atom update :tasks conj new-task)))
+
 (def tasks->reactflow-config
   (memoize
    (fn [tasks]
@@ -194,13 +200,6 @@
       (swap! state-atom update :tasks
              (fn [tasks]
                (remove #(= (:id %) selected-task) tasks)))
-      (swap! state-atom update :calculated-nodes
-             (fn [nodes]
-               (remove #(= (:id %) selected-task) nodes)))
-      (swap! state-atom update :calculated-edges
-             (fn [edges]
-               (remove #(or (= (:source %) selected-task)
-                            (= (:target %) selected-task)) edges)))
       (swap! state-atom update :selectedTask (fn [_] nil)))
     (when selected-edge
       (let [[source-id target-id] (edgeid->ids selected-edge)]
@@ -209,12 +208,7 @@
                  (map #(if (= (:id %) source-id)
                          (remove-dep-from-row target-id %)
                          %) tasks)))
-        (swap! state-atom update :calculated-edges
-               (fn [edges]
-                 (remove #(= (:id %) selected-edge) edges)))
-        (swap! state-atom update :selectedEdge (fn [_] nil)))))
-  ; call other delete handlers if needed
-  )
+        (swap! state-atom update :selectedEdge (fn [_] nil))))))
 
 
 (def columns [{:field "id" :headerName "ID" :width 100}
@@ -250,10 +244,14 @@
        ($ :div {:style {:display "block"
                         :height "50vh"
                         :width "100%"}}
+          ($ :button {:onClick handle-add-task
+                    :style {:margin "10px"}}
+             "Add Task")
           ($ DataGrid {
                        :rows (clj->js tasks)
                        :columns (clj->js columns)
                        :processRowUpdate handle-row-update
+                       :onCellEditStart (fn [_] (swap! state-atom update :selectedTask (fn [_] nil)))
                        :onProcessRowUpdateError (fn [error] (print error))
                        })))))
 
