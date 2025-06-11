@@ -12,26 +12,26 @@
 (def initial-tasks
   [
    {:id "1"
-    :label "Node 1"
+    :label "Buy Ingredients"
     :description "Node 1 description"}
    {:id "2"
-    :label "Node 2"
+    :label "Mix Ingredients"
     :description "Node 2 description"
     :dependencies ["1"]}
    {:id "3"
-    :label "Node 3"
+    :label "place dough on pan"
     :description "Node 3 description"
     :dependencies ["2"]}
    {:id "4"
-    :label "Node 4"
+    :label "Bake dough"
     :description "Node 4 description"
     :dependencies ["2"]}
    {:id "5"
-    :label "Node 5"
+    :label "preheat oven"
     :description "Node 5 description"
     :dependencies ["3"]}
    {:id "6"
-    :label "Node 6"
+    :label "eat cookies"
     :description "Node 6 description"
     :dependencies ["4" "5"]}
    ])
@@ -251,7 +251,7 @@
                        :rows (clj->js tasks)
                        :columns (clj->js columns)
                        :processRowUpdate handle-row-update
-                       :onCellEditStart (fn [_] (swap! state-atom update :selectedTask (fn [_] nil)))
+                       :onCellEditStart (fn [_] (swap! state-atom merge {:selectedTask nil :selectedEdge nil} ))
                        :onProcessRowUpdateError (fn [error] (print error))
                        })))))
 
