@@ -32,7 +32,8 @@ jobs:
         run: npm ci
 
       - name: Build for production
-        run: npx shadow-cljs release frontend
+        # run: npx shadow-cljs release frontend  # TODO: fix bug in release compilation
+        run: npx shadow-cljs compile frontend
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
