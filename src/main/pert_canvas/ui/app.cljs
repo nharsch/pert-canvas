@@ -131,7 +131,7 @@
 
 
 ;; state management
-(def app-db (r/atom initial-state))
+;; (def app-db (r/atom initial-state))
 
 
 (rf/reg-event-fx
@@ -158,9 +158,7 @@
    (println "select-row" selected-id)
    (assoc db :app/selected-task (int selected-id))))
 
-(comment
-  (println (:id (first (:app/tasks @app-db))))
-  )
+
 
 (rf/reg-event-db
  :unselect-row
@@ -182,11 +180,7 @@
 (rf/reg-sub
  :app/tasks
  (fn [db _]
-   (->> (:app/tasks db)
-        (map (fn [task]
-               (cond (= (:id task) (:app/selected-task db))
-                     (assoc task :selected true)
-                     :else task))))))
+   (:app/tasks db)))
 
 (comment
   (println (->> @(rf/subscribe [:app/tasks])
@@ -201,7 +195,7 @@
    (println "create-connection" source-id target-id)
    (update-in db [:app/tasks]
               (fn [tasks]
-                (map #(if (= (:id %) target-id)
+                (map #(if (= (:id %) (int target-id))
                         (update % :dependencies conj source-id)
                         %) tasks)))))
 
@@ -282,32 +276,43 @@
 
 
 ;; app
-(def tasks->reactflow-config
-  (memoize
-   (fn [tasks]
-     (let [nodes (tasks->canvas-nodes tasks)
-           edges (tasks->canvas-edges tasks)]
-       (clj->js
-        {:nodes nodes
-         :edges edges
-         :onNodeMouseEnter #(rf/dispatch [:hover-node (int (.-id %2))])
-         :onNodeMouseLeave #(rf/dispatch [:leave-node (int (.-id %2))])
-         :onNodeClick #(rf/dispatch [:select-row (int (.-id %2))])
-         :onConnect #(rf/dispatch [:create-connection (.-source %) (.-target %)])
-         :onEdgesChange handle-edge-selection
-         :onEdgesDelete (fn [event] (println "on delete: " event))
-         :fitView true
-         }))
-     )))
+;; TODO: make this subscription only update on changes to tasks or selected-task
+(rf/reg-sub
+ :reactflow/config
+ :<- [:app/tasks]
+ :<- [:app/selected-task]
+ (memoize
+  (fn [[tasks selected-task] _]
+    (let [nodes (tasks->canvas-nodes tasks)
+          edges (tasks->canvas-edges tasks)]
+      (clj->js
+       {:nodes nodes
+        :edges edges
+        :selected [selected-task]
+        :onNodeMouseEnter #(rf/dispatch [:hover-node (int (.-id %2))])
+        :onNodeMouseLeave #(rf/dispatch [:leave-node (int (.-id %2))])
+        :onNodeClick #(rf/dispatch [:select-row (int (.-id %2))])
+        :onConnect #(rf/dispatch [:create-connection (.-source %) (.-target %)])
+        :onEdgesChange handle-edge-selection
+        :onEdgesDelete (fn [event] (println "on delete: " event))
+        :fitView true
+        }))
+    )))
 
-(defn state-tasks->datagrid-tasks [tasks]
-  (->> tasks
-      (map #(assoc % :Selected (:selected %)))
-      clj->js
-      ))
+(comment
+  @(rf/subscribe [:reactflow/config])
+  (map :selected @(rf/subscribe [:app/tasks]))
+  )
 
-(js/console.log (state-tasks->datagrid-tasks @(rf/subscribe [:app/selected-task])))
-(println (:app/selected-task @app-db))
+(rf/reg-sub
+ :datagrid/rows
+ :<- [:app/tasks]
+ (memoize
+  (fn [tasks _]
+    (->> tasks
+         clj->js
+         ))))
+
 
 (def columns [
               {:field "id" :headerName "ID" :width 100}
@@ -333,12 +338,11 @@
        #(.removeEventListener js/document "keydown" handle-keydown)))
    [])
 
-  (let [selected-task (urf/use-subscribe [:app/selected-task])
-        tasks (urf/use-subscribe [:app/tasks])]
+  (let [selected-task (urf/use-subscribe [:app/selected-task])]
     ($ :div {:style {:height "60vh" :width "100%"}}
        ($ :h1 nil "PERT Canvas")
        ($ :div {:style {:height "50vh"}}
-          ($ ReactFlow (tasks->reactflow-config tasks)
+          ($ ReactFlow (urf/use-subscribe [:reactflow/config])
              ($ Background nil)
              ($ Controls nil)))
        ($ :p nil "Active task is " selected-task)
@@ -349,7 +353,7 @@
                       :style {:margin "10px"}}
              "Add Task")
           ($ DataGrid {
-                       :rows (state-tasks->datagrid-tasks tasks)
+                       :rows (urf/use-subscribe [:datagrid/rows])
                        :columns (clj->js columns)
                        :processRowUpdate handle-row-update
                        :rowSelectionModel (clj->js [selected-task])
@@ -359,8 +363,10 @@
                        :onProcessRowUpdateError (fn [error] (print error))
                        })))))
 
-
-
+(comment
+  @(rf/subscribe [:app/tasks])
+  @(rf/subscribe [:app/selected-task])
+  )
 
 (defonce root
   (uix.dom/create-root (js/document.getElementById "root")))
