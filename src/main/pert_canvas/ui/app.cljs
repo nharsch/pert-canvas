@@ -133,7 +133,6 @@
 ;; state management
 (def app-db (r/atom initial-state))
 
-(println (type (:id (first (:app/tasks @app-db)))))
 
 (rf/reg-event-fx
  :initialize-db
@@ -152,11 +151,16 @@
  (fn [db [_ id]]
    (assoc db :app/hovered-task (int id))))
 
+
 (rf/reg-event-db
  :select-row
- (fn [db [_ id]]
-   (println "select-row" id)
-   (assoc db :app/selected-task (int id))))
+ (fn [db [_ selected-id]]
+   (println "select-row" selected-id)
+   (assoc db :app/selected-task (int selected-id))))
+
+(comment
+  (println (:id (first (:app/tasks @app-db))))
+  )
 
 (rf/reg-event-db
  :unselect-row
@@ -174,10 +178,22 @@
  (fn [db _]
    (:app/selected-task db)))
 
+
 (rf/reg-sub
  :app/tasks
  (fn [db _]
-   (:app/tasks db)))
+   (->> (:app/tasks db)
+        (map (fn [task]
+               (cond (= (:id task) (:app/selected-task db))
+                     (assoc task :selected true)
+                     :else task))))))
+
+(comment
+  (println (->> @(rf/subscribe [:app/tasks])
+                (map :selected)))
+  (println (->> @(rf/subscribe [:app/selected-task])
+                (map :id)))
+  )
 
 (rf/reg-event-db
  :create-connection
@@ -284,6 +300,15 @@
          }))
      )))
 
+(defn state-tasks->datagrid-tasks [tasks]
+  (->> tasks
+      (map #(assoc % :Selected (:selected %)))
+      clj->js
+      ))
+
+(js/console.log (state-tasks->datagrid-tasks @(rf/subscribe [:app/selected-task])))
+(println (:app/selected-task @app-db))
+
 (def columns [
               {:field "id" :headerName "ID" :width 100}
               {:field "label" :headerName "Label" :editable true :width 200}
@@ -312,11 +337,11 @@
         tasks (urf/use-subscribe [:app/tasks])]
     ($ :div {:style {:height "60vh" :width "100%"}}
        ($ :h1 nil "PERT Canvas")
-       ($ :p nil "Active task is " selected-task " (hover over a node to select it)")
        ($ :div {:style {:height "50vh"}}
           ($ ReactFlow (tasks->reactflow-config tasks)
              ($ Background nil)
              ($ Controls nil)))
+       ($ :p nil "Active task is " selected-task)
        ($ :div {:style {:display "block"
                         :height "50vh"
                         :width "100%"}}
@@ -324,14 +349,16 @@
                       :style {:margin "10px"}}
              "Add Task")
           ($ DataGrid {
-                       :rows (clj->js tasks)
+                       :rows (state-tasks->datagrid-tasks tasks)
                        :columns (clj->js columns)
                        :processRowUpdate handle-row-update
-                       ;; :onRowClick #(rf/dispatch [:select-row (int (.-id %))] )
+                       :rowSelectionModel (clj->js [selected-task])
+                       :onRowClick #(rf/dispatch [:select-row (int (.-id %))] )
                        :onCellEditStart #(rf/dispatch [:select-row (int (.-id %))])
                        :onCellEditStop #(rf/dispatch [:unselect-row (int (.-id %))])
                        :onProcessRowUpdateError (fn [error] (print error))
                        })))))
+
 
 
 
