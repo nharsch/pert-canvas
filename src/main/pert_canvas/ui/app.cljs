@@ -81,14 +81,9 @@
                 (assoc node :position {:x x :y y})))
             nodes)))))
 
-(defn state-tasks->canvas-nodes [state-node]
-  {:id (str (:id state-node))
-   :position {:x 0 :y 0}
-   :sourcePosition "right"
-   :targetPosition "left"
-   :dependencies (map str (:dependencies state-node))
-   :data {:label (:label state-node)
-          :description (:description state-node)}})
+
+
+
 
 (def tasks->canvas-edges
   (memoize
@@ -101,13 +96,6 @@
                     (:dependencies task)))
              tasks))))
 
-(def tasks->canvas-nodes
-  (memoize
-   (fn [tasks]
-     (let [canvas-edges (tasks->canvas-edges tasks)]
-       (as-> tasks val
-         (map state-tasks->canvas-nodes val)
-         (get-layouted-nodes val canvas-edges))))))
 
 
 (defn get-row-by-id [id nodes]
@@ -228,8 +216,8 @@
   (println "delete-task" task-id)
   (let [new-tasks
         (update db :app/tasks
-                   (fn [tasks]
-                     (remove #(= (:id %) (int task-id)) tasks)))]
+                (fn [tasks]
+                  (remove #(= (:id %) (int task-id)) tasks)))]
     (println "db after delete" (map :id (:app/tasks new-tasks)))
     new-tasks)
   )
@@ -274,6 +262,37 @@
 
 
 
+(defn state-tasks->canvas-nodes [state-node]
+  {:id (str (:id state-node))
+   :position {:x 0 :y 0}
+   :sourcePosition "right"
+   :targetPosition "left"
+   :selected (:selected state-node false)
+   :dependencies (map str (:dependencies state-node))
+   :data {:label (:label state-node)
+          :description (:description state-node)}})
+
+(defn mark-task-selected [task-id tasks]
+  (map #(if (= (:id %) (int task-id))
+          (assoc % :selected true)
+          %)
+       tasks))
+
+(def tasks-selected->canvas-nodes
+  (memoize
+   (fn [tasks selected-task]
+     (let [canvas-edges (tasks->canvas-edges tasks)]
+       (as-> tasks ts
+         (mark-task-selected selected-task ts)
+         (map state-tasks->canvas-nodes ts)
+         (get-layouted-nodes ts canvas-edges))))))
+(comment
+  (->> initial-tasks
+       (mark-task-selected 1)
+       (map state-tasks->canvas-nodes)
+       get-layouted-nodes)
+  (tasks-selected->canvas-nodes initial-tasks 2)
+)
 
 ;; app
 ;; TODO: make this subscription only update on changes to tasks or selected-task
@@ -283,12 +302,11 @@
  :<- [:app/selected-task]
  (memoize
   (fn [[tasks selected-task] _]
-    (let [nodes (tasks->canvas-nodes tasks)
+    (let [nodes (tasks-selected->canvas-nodes tasks selected-task)
           edges (tasks->canvas-edges tasks)]
       (clj->js
        {:nodes nodes
         :edges edges
-        :selected [selected-task]
         :onNodeMouseEnter #(rf/dispatch [:hover-node (int (.-id %2))])
         :onNodeMouseLeave #(rf/dispatch [:leave-node (int (.-id %2))])
         :onNodeClick #(rf/dispatch [:select-row (int (.-id %2))])
@@ -300,8 +318,7 @@
     )))
 
 (comment
-  @(rf/subscribe [:reactflow/config])
-  (map :selected @(rf/subscribe [:app/tasks]))
+  (js/console.log (.-nodes @(rf/subscribe [:reactflow/config])))
   )
 
 (rf/reg-sub
@@ -309,6 +326,7 @@
  :<- [:app/tasks]
  (memoize
   (fn [tasks _]
+    (println ":datagrid/rows")
     (->> tasks
          clj->js
          ))))
@@ -352,6 +370,7 @@
           ($ :button {:onClick #(rf/dispatch [:add-task])
                       :style {:margin "10px"}}
              "Add Task")
+          ;; TODO: consider recomputing DataGrid config as reactive sub
           ($ DataGrid {
                        :rows (urf/use-subscribe [:datagrid/rows])
                        :columns (clj->js columns)

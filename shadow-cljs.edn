@@ -14,11 +14,11 @@
  :js-options {:resolve {"@xyflow/react/dist/style.css" {:target :file
                                                         :file "node_modules/@xyflow/react/dist/style.css"}}}
  :dev-http {8080 "public"}
+ :nrepl {:port 7002}
  :builds
  {:frontend
   {:target :browser
    :compiler-options {:infer-externs true
                       :source-map true}
    :modules {:main {:init-fn pert-canvas.ui.app/init}}
-   ;; :devtools
    }}}
