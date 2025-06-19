@@ -45,14 +45,13 @@
    })
 
 ;; Utils
-
 (defn edgeid->ids [edge-id]
   (let [[_ source-id target-id] (str/split edge-id #"-")]
-    (mapv int [source-id target-id])))
+    (map int [source-id target-id])))
 
 (defn remove-dep-from-row [dep-id row]
   (let [dependencies (:dependencies row)]
-    (assoc row :dependencies (remove #(= % dep-id) dependencies))))
+    (assoc row :dependencies (remove #(= (int %) (int dep-id)) dependencies))))
 
 
 (def get-layouted-nodes
@@ -82,9 +81,6 @@
             nodes)))))
 
 
-
-
-
 (def tasks->canvas-edges
   (memoize
    (fn [tasks]
@@ -95,7 +91,6 @@
                        :target (str (:id task))})
                     (:dependencies task)))
              tasks))))
-
 
 
 (defn get-row-by-id [id nodes]
@@ -118,51 +113,64 @@
   (mapv int (str/split val #",\s*")))
 
 
-;; state management
-;; (def app-db (r/atom initial-state))
-
-
 (rf/reg-event-fx
  :initialize-db
  (println ":initialize-db")
  (fn [_ _]
    {:db initial-state}))
 
-
 (rf/reg-event-db
- :hover-node
+ :ui/hover-node
  (fn [db [_ id]]
    (assoc db :app/hovered-task (int id))))
 
 (rf/reg-event-db
- :hover-row
+ :ui/leave-node
  (fn [db [_ id]]
-   (assoc db :app/hovered-task (int id))))
-
+   (assoc db :app/hovered-task nil)))
 
 (rf/reg-event-db
- :select-row
+ :ui/select-row
  (fn [db [_ selected-id]]
-   (println "select-row" selected-id)
-   (assoc db :app/selected-task (int selected-id))))
-
-
+   (assoc db :app/selected-task (int selected-id)
+             :app/selected-edge nil)))
 
 (rf/reg-event-db
- :unselect-row
+ :ui/select-node
+ (fn [db [_ id]]
+   (println "select-node" id)
+   (assoc db :app/selected-task (int id)
+             :app/selected-edge nil)))
+
+(rf/reg-event-db
+ :ui/edit-row-start
+ (fn [db [_ id]]
+   (println "edit-row-start" id)
+   (assoc db :app/selected-task (int id)
+          :ui/editing-text true)))
+
+(rf/reg-event-db
+ :ui/edit-row-end
+ (fn [db [_ id]]
+   (println "edit-row-end" id)
+   (assoc db :ui/editing-text false)))
+
+(rf/reg-event-db
+ :ui/unselect-row
  (fn [db [_ id]]
    (println "unselect-row" id)
    (assoc db :app/selected-task nil)))
 
-(rf/reg-event-db
- :leave-node
- (fn [db [_ id]]
-   (assoc db :app/hovered-task nil)))
 
 (rf/reg-sub
  :app/selected-task
  (fn [db _]
    (:app/selected-task db)))
+
+(rf/reg-sub
+ :app/selected-edge
+ (fn [db _]
+   (:app/selected-edge db)))
 
 
 (rf/reg-sub
@@ -170,15 +178,21 @@
  (fn [db _]
    (:app/tasks db)))
 
+(rf/reg-sub
+ :ui/editing-text
+ (fn [db _]
+   (:ui/editing-text db)))
+
 (comment
   (println (->> @(rf/subscribe [:app/tasks])
                 (map :selected)))
   (println (->> @(rf/subscribe [:app/selected-task])
                 (map :id)))
+  @(rf/subscribe [:app/selected-edge])
   )
 
 (rf/reg-event-db
- :create-connection
+ :ui/create-connection
  (fn [db [_ source-id target-id]]
    (println "create-connection" source-id target-id)
    (update-in db [:app/tasks]
@@ -188,7 +202,7 @@
                         %) tasks)))))
 
 (rf/reg-event-db
- :update-row
+ :ui/update-row
  (fn [db [_ row]]
    (update-in db [:app/tasks]
               (fn [tasks]
@@ -197,18 +211,20 @@
 (defn handle-row-update [js-row]
   ;; TODO: validate row before dispatching
   (let [row (js->clj js-row :keywordize-keys true)]
-    (rf/dispatch [:update-row row])
+    (rf/dispatch [:ui/update-row row])
     (clj->js row)))
 
 (rf/reg-event-db
- :select-edge
+ :ui/select-edge
  (fn [db [_ edge-id]]
    (println "select-edge" edge-id)
-   (assoc db :app/selected-edge edge-id)))
+   (assoc db :app/selected-edge edge-id
+             :app/selected-task nil)))
 
 (defn handle-edge-selection [edges]
   (let [edge (first edges)]
-    (rf/dispatch [:select-edge (.-id edge)])))
+    (println "handle-edge-selection" (.-id edge))
+    (rf/dispatch [:ui/select-edge (.-id edge)])))
 
 
 (defn delete-task-from-db
@@ -226,14 +242,16 @@
   [db edge-id]
   (println "delete-edge" edge-id)
   (let [[source-id target-id] (edgeid->ids edge-id)]
+    (println "source-id" source-id "target-id" target-id)
     (update-in db [:app/tasks]
                (fn [tasks]
                  (map #(if (= (:id %) source-id)
-                         (remove-dep-from-row target-id %)
+                         (do
+                           (remove-dep-from-row target-id %))
                          %) tasks)))))
 
 (rf/reg-event-db
- :delete-selected
+ :ui/delete-selected
  (fn [db _]
    (println "delete-selected" (:app/selected-task db) (:app/selected-edge db))
    (let [selected-task (:app/selected-task db)
@@ -249,7 +267,7 @@
 
 
 (rf/reg-event-db
- :add-task
+ :ui/add-task
  (fn [db _]
    (let [new-id (inc (count (:app/tasks db)))
          new-task {:id new-id
@@ -307,12 +325,12 @@
       (clj->js
        {:nodes nodes
         :edges edges
-        :onNodeMouseEnter #(rf/dispatch [:hover-node (int (.-id %2))])
-        :onNodeMouseLeave #(rf/dispatch [:leave-node (int (.-id %2))])
-        :onNodeClick #(rf/dispatch [:select-row (int (.-id %2))])
-        :onConnect #(rf/dispatch [:create-connection (.-source %) (.-target %)])
+        :onNodeMouseEnter #(rf/dispatch [:ui/hover-node (int (.-id %2))])
+        :onNodeMouseLeave #(rf/dispatch [:ui/leave-node (int (.-id %2))])
+        :onNodeClick #(rf/dispatch [:ui/select-node (int (.-id %2))])
+        :onConnect #(rf/dispatch [:ui/create-connection (.-source %) (.-target %)])
         :onEdgesChange handle-edge-selection
-        :onEdgesDelete (fn [event] (println "on delete: " event))
+        ;; :onEdgesDelete (fn [event] (println "on delete: " event))
         :fitView true
         }))
     )))
@@ -344,19 +362,26 @@
                               row)
                }])
 (defui app []
-  (uix/use-effect
-   (fn []
-     (let [handle-keydown (fn [event]
-                            (when (or (= (.-key event) "Delete")
-                                      (= (.-key event) "Backspace"))
-                              (rf/dispatch [:delete-selected])
-                              ))]
-       (.addEventListener js/document "keydown" handle-keydown)
-       ;; Cleanup function
-       #(.removeEventListener js/document "keydown" handle-keydown)))
-   [])
 
-  (let [selected-task (urf/use-subscribe [:app/selected-task])]
+
+  (let [selected-task (urf/use-subscribe [:app/selected-task])
+        editing? (urf/use-subscribe [:ui/editing-text])
+        ]
+    (uix/use-effect
+     (fn []
+       (let [handle-keydown (fn [event]
+                              (when (or (= (.-key event) "Delete")
+                                        (= (.-key event) "Backspace"))
+                                (cond (not editing?)
+                                      (do
+                                        (rf/dispatch [:ui/delete-selected])
+                                        (.preventDefault event)))))]
+         (.addEventListener js/document "keydown" handle-keydown)
+         ;; Cleanup function
+         #(.removeEventListener js/document "keydown" handle-keydown)))
+     [editing?])
+
+    ; UI
     ($ :div {:style {:height "60vh" :width "100%"}}
        ($ :h1 nil "PERT Canvas")
        ($ :div {:style {:height "50vh"}}
@@ -367,7 +392,7 @@
        ($ :div {:style {:display "block"
                         :height "50vh"
                         :width "100%"}}
-          ($ :button {:onClick #(rf/dispatch [:add-task])
+          ($ :button {:onClick #(rf/dispatch [:ui/add-task])
                       :style {:margin "10px"}}
              "Add Task")
           ;; TODO: consider recomputing DataGrid config as reactive sub
@@ -376,9 +401,9 @@
                        :columns (clj->js columns)
                        :processRowUpdate handle-row-update
                        :rowSelectionModel (clj->js [selected-task])
-                       :onRowClick #(rf/dispatch [:select-row (int (.-id %))] )
-                       :onCellEditStart #(rf/dispatch [:select-row (int (.-id %))])
-                       :onCellEditStop #(rf/dispatch [:unselect-row (int (.-id %))])
+                       :onRowClick #(rf/dispatch [:ui/select-row (int (.-id %))] )
+                       :onCellEditStart #(rf/dispatch [:ui/edit-row-start (int (.-id %))])
+                       :onCellEditStop #(rf/dispatch [:ui/edit-row-end (int (.-id %))])
                        :onProcessRowUpdateError (fn [error] (print error))
                        })))))
 
@@ -392,6 +417,5 @@
 
 
 (defn ^:dev/after-load init []
-  (print "Hello, world!")
   (rf/dispatch-sync [:initialize-db])
   (uix.dom/render-root ($ app) root))
