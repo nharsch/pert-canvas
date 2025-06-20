@@ -1,8 +1,7 @@
 (ns pert-canvas.ui.app
-  (:require [uix.core :as uix :refer [defui defhook $]]
+  (:require [uix.core :as uix :refer [defui $]]
             [uix.dom]
             [uix.re-frame :as urf]
-            [reagent.core :as r]
             [re-frame.core :as rf]
             [clojure.string :as str]
             ["@xyflow/react" :refer [ReactFlow Background Controls]]
@@ -92,6 +91,15 @@
                     (:dependencies task)))
              tasks))))
 
+(defn state-task->canvas-node [state-task]
+  {:id (str (:id state-task))
+   :position {:x 0 :y 0}
+   :sourcePosition "right"
+   :targetPosition "left"
+   :selected (:selected state-task false)
+   :dependencies (map str (:dependencies state-task))
+   :data {:label (:label state-task)
+          :description (:description state-task)}})
 
 (defn get-row-by-id [id nodes]
   (->> nodes
@@ -109,124 +117,6 @@
        (filter #(= name (:label %)))
        (first)))
 
-(defn parse-dependencies [val]
-  (mapv int (str/split val #",\s*")))
-
-
-(rf/reg-event-fx
- :initialize-db
- (println ":initialize-db")
- (fn [_ _]
-   {:db initial-state}))
-
-(rf/reg-event-db
- :ui/hover-node
- (fn [db [_ id]]
-   (assoc db :app/hovered-task (int id))))
-
-(rf/reg-event-db
- :ui/leave-node
- (fn [db [_ id]]
-   (assoc db :app/hovered-task nil)))
-
-(rf/reg-event-db
- :ui/select-row
- (fn [db [_ selected-id]]
-   (assoc db :app/selected-task (int selected-id)
-             :app/selected-edge nil)))
-
-(rf/reg-event-db
- :ui/select-node
- (fn [db [_ id]]
-   (println "select-node" id)
-   (assoc db :app/selected-task (int id)
-             :app/selected-edge nil)))
-
-(rf/reg-event-db
- :ui/edit-row-start
- (fn [db [_ id]]
-   (println "edit-row-start" id)
-   (assoc db :app/selected-task (int id)
-          :ui/editing-text true)))
-
-(rf/reg-event-db
- :ui/edit-row-end
- (fn [db [_ id]]
-   (println "edit-row-end" id)
-   (assoc db :ui/editing-text false)))
-
-(rf/reg-event-db
- :ui/unselect-row
- (fn [db [_ id]]
-   (println "unselect-row" id)
-   (assoc db :app/selected-task nil)))
-
-
-(rf/reg-sub
- :app/selected-task
- (fn [db _]
-   (:app/selected-task db)))
-
-(rf/reg-sub
- :app/selected-edge
- (fn [db _]
-   (:app/selected-edge db)))
-
-
-(rf/reg-sub
- :app/tasks
- (fn [db _]
-   (:app/tasks db)))
-
-(rf/reg-sub
- :ui/editing-text
- (fn [db _]
-   (:ui/editing-text db)))
-
-(comment
-  (println (->> @(rf/subscribe [:app/tasks])
-                (map :selected)))
-  (println (->> @(rf/subscribe [:app/selected-task])
-                (map :id)))
-  @(rf/subscribe [:app/selected-edge])
-  )
-
-(rf/reg-event-db
- :ui/create-connection
- (fn [db [_ source-id target-id]]
-   (println "create-connection" source-id target-id)
-   (update-in db [:app/tasks]
-              (fn [tasks]
-                (map #(if (= (:id %) (int target-id))
-                        (update % :dependencies conj source-id)
-                        %) tasks)))))
-
-(rf/reg-event-db
- :ui/update-row
- (fn [db [_ row]]
-   (update-in db [:app/tasks]
-              (fn [tasks]
-                (map #(if (= (:id %) (:id row)) row %) tasks)))))
-
-(defn handle-row-update [js-row]
-  ;; TODO: validate row before dispatching
-  (let [row (js->clj js-row :keywordize-keys true)]
-    (rf/dispatch [:ui/update-row row])
-    (clj->js row)))
-
-(rf/reg-event-db
- :ui/select-edge
- (fn [db [_ edge-id]]
-   (println "select-edge" edge-id)
-   (assoc db :app/selected-edge edge-id
-             :app/selected-task nil)))
-
-(defn handle-edge-selection [edges]
-  (let [edge (first edges)]
-    (println "handle-edge-selection" (.-id edge))
-    (rf/dispatch [:ui/select-edge (.-id edge)])))
-
-
 (defn delete-task-from-db
   [db task-id]
   (println "delete-task" task-id)
@@ -234,9 +124,7 @@
         (update db :app/tasks
                 (fn [tasks]
                   (remove #(= (:id %) (int task-id)) tasks)))]
-    (println "db after delete" (map :id (:app/tasks new-tasks)))
-    new-tasks)
-  )
+    new-tasks))
 
 (defn delete-edge-from-db
   [db edge-id]
@@ -250,10 +138,99 @@
                            (remove-dep-from-row target-id %))
                          %) tasks)))))
 
+(defn parse-dependencies [val]
+  (mapv int (str/split val #",\s*")))
+
+(def mark-nodes-selected
+  (memoize
+   (fn [selected-id nodes]
+     (map #(if (= (:id %) (int selected-id))
+             (assoc % :selected true)
+             %)
+          nodes))))
+
+;; Re-frame events and subscriptions
+(rf/reg-event-fx
+ :initialize-db
+ (println ":initialize-db")
+ (fn [_ _]
+   {:db initial-state}))
+
+(rf/reg-event-db
+ :ui/hover-node
+ (fn [db [_ id]]
+   ;; (println "hover-node" id)
+   (assoc db :app/hovered-task (int id))))
+
+(rf/reg-event-db
+ :ui/leave-node
+ (fn [db [_ id]]
+   ;; (println "leave-node" id)
+   (assoc db :app/hovered-task nil)))
+
+(rf/reg-event-db
+ :ui/select-row
+ (fn [db [_ id]]
+   ;; (println "select-row" id)
+   (assoc db :app/selected-task (int id)
+             :app/selected-edge nil)))
+
+(rf/reg-event-db
+ :ui/select-node
+ (fn [db [_ id]]
+   ;; (println "select-node" id)
+   (assoc db :app/selected-task (int id)
+             :app/selected-edge nil)))
+
+(rf/reg-event-db
+ :ui/edit-row-start
+ (fn [db [_ id]]
+   ;; (println "edit-row-start" id)
+   (assoc db :app/selected-task (int id)
+          :ui/editing-text true)))
+
+(rf/reg-event-db
+ :ui/edit-row-end
+ (fn [db [_ id]]
+   ;; (println "edit-row-end" id)
+   (assoc db :ui/editing-text false)))
+
+(rf/reg-event-db
+ :ui/unselect-row
+ (fn [db [_ id]]
+   ;; (println "unselect-row" id)
+   (assoc db :app/selected-task nil)))
+
+
+(rf/reg-event-db
+ :ui/create-connection
+ (fn [db [_ source-id target-id]]
+   ;; (println "create-connection" source-id target-id)
+   (update-in db [:app/tasks]
+              (fn [tasks]
+                (map #(if (= (:id %) (int target-id))
+                        (update % :dependencies conj source-id)
+                        %) tasks)))))
+
+(rf/reg-event-db
+ :ui/update-row
+ (fn [db [_ row]]
+   ;; (println "update-row" row)
+   (update-in db [:app/tasks]
+              (fn [tasks]
+                (map #(if (= (:id %) (:id row)) row %) tasks)))))
+
+(rf/reg-event-db
+ :ui/select-edge
+ (fn [db [_ edge-id]]
+   ;; (println "select-edge" edge-id)
+   (assoc db :app/selected-edge edge-id
+          :app/selected-task nil)))
+
 (rf/reg-event-db
  :ui/delete-selected
  (fn [db _]
-   (println "delete-selected" (:app/selected-task db) (:app/selected-edge db))
+   ;; (println "delete-selected" (:app/selected-task db) (:app/selected-edge db))
    (let [selected-task (:app/selected-task db)
          selected-edge (:app/selected-edge db)]
      (cond
@@ -265,10 +242,10 @@
                          (assoc :app/selected-edge nil))
        :else db))))
 
-
 (rf/reg-event-db
  :ui/add-task
  (fn [db _]
+   ;; (println "add-task")
    (let [new-id (inc (count (:app/tasks db)))
          new-task {:id new-id
                    :label (str "Node " new-id)
@@ -279,77 +256,93 @@
          (assoc :app/selected-task new-id)))))
 
 
+(rf/reg-sub
+ :app/selected-task
+ (fn [db _]
+   ;; (println "sub :app/selected-task")
+   (:app/selected-task db)))
 
-(defn state-tasks->canvas-nodes [state-node]
-  {:id (str (:id state-node))
-   :position {:x 0 :y 0}
-   :sourcePosition "right"
-   :targetPosition "left"
-   :selected (:selected state-node false)
-   :dependencies (map str (:dependencies state-node))
-   :data {:label (:label state-node)
-          :description (:description state-node)}})
+(rf/reg-sub
+ :app/selected-edge
+ (fn [db _]
+   ;; (println "sub :app/selected-edge")
+   (:app/selected-edge db)))
 
-(defn mark-task-selected [task-id tasks]
-  (map #(if (= (:id %) (int task-id))
-          (assoc % :selected true)
-          %)
-       tasks))
 
-(def tasks-selected->canvas-nodes
-  (memoize
-   (fn [tasks selected-task]
-     (let [canvas-edges (tasks->canvas-edges tasks)]
-       (as-> tasks ts
-         (mark-task-selected selected-task ts)
-         (map state-tasks->canvas-nodes ts)
-         (get-layouted-nodes ts canvas-edges))))))
-(comment
-  (->> initial-tasks
-       (mark-task-selected 1)
-       (map state-tasks->canvas-nodes)
-       get-layouted-nodes)
-  (tasks-selected->canvas-nodes initial-tasks 2)
-)
+(rf/reg-sub
+ :app/tasks
+ (fn [db _]
+   ;; (println "sub :app/tasks")
+   (:app/tasks db)))
+
+(rf/reg-sub
+ :ui/editing-text
+ (fn [db _]
+   ;; (println "sub :ui/editing-text")
+   (:ui/editing-text db)))
+
+
+(rf/reg-sub
+ :reactflow/edges
+ :<- [:app/tasks]
+ (fn [tasks _]
+   ;; (println ":reactflow/edges")
+   (tasks->canvas-edges tasks)))
+
+(rf/reg-sub
+ :reactflow/layouted-nodes
+ :<- [:app/tasks]
+ :<- [:reactflow/edges]
+ (fn [[tasks edges] _]
+   ;; (println ":reactflow/layouted-nodes")
+   (get-layouted-nodes (map state-task->canvas-node tasks)
+                       edges)))
+
+(rf/reg-sub
+ :reactflow/nodes-with-selected
+  :<- [:reactflow/layouted-nodes]
+  :<- [:app/selected-task]
+  (fn [[nodes selected-id] _]
+    ;; (println ":reactflow/nodes-with-selected")
+    (mark-nodes-selected selected-id nodes)))
 
 ;; app
 ;; TODO: make this subscription only update on changes to tasks or selected-task
 (rf/reg-sub
  :reactflow/config
- :<- [:app/tasks]
- :<- [:app/selected-task]
- (memoize
-  (fn [[tasks selected-task] _]
-    (let [nodes (tasks-selected->canvas-nodes tasks selected-task)
-          edges (tasks->canvas-edges tasks)]
-      (clj->js
-       {:nodes nodes
-        :edges edges
-        :onNodeMouseEnter #(rf/dispatch [:ui/hover-node (int (.-id %2))])
-        :onNodeMouseLeave #(rf/dispatch [:ui/leave-node (int (.-id %2))])
-        :onNodeClick #(rf/dispatch [:ui/select-node (int (.-id %2))])
-        :onConnect #(rf/dispatch [:ui/create-connection (.-source %) (.-target %)])
-        :onEdgesChange handle-edge-selection
-        ;; :onEdgesDelete (fn [event] (println "on delete: " event))
-        :fitView true
-        }))
-    )))
-
-(comment
-  (js/console.log (.-nodes @(rf/subscribe [:reactflow/config])))
-  )
+ :<- [:reactflow/nodes-with-selected]
+ :<- [:reactflow/edges]
+ (fn [[nodes edges] _]
+   (println "sub :reactflow/config")
+   (clj->js
+    {:nodes nodes
+     :edges edges
+     :onNodeMouseEnter #(rf/dispatch [:ui/hover-node (int (.-id %2))])
+     :onNodeMouseLeave #(rf/dispatch [:ui/leave-node (int (.-id %2))])
+     :onNodeClick #(rf/dispatch [:ui/select-node (int (.-id %2))])
+     :onConnect #(rf/dispatch [:ui/create-connection (.-source %) (.-target %)])
+     :onEdgesChange (fn [edges] (rf/dispatch [:ui/select-edge (.-id (first edges))]))
+     ;; :onEdgesDelete (fn [event] (println "on delete: " event))
+     :fitView true
+     })
+   ))
 
 (rf/reg-sub
  :datagrid/rows
  :<- [:app/tasks]
- (memoize
-  (fn [tasks _]
-    (println ":datagrid/rows")
-    (->> tasks
-         clj->js
-         ))))
+ (fn [tasks _]
+   (println ":datagrid/rows")
+   (clj->js tasks)))
 
 
+(defn handle-row-update [js-row]
+  ;; TODO: validate row before dispatching
+  (let [row (js->clj js-row :keywordize-keys true)]
+    (println "handle-row-update" row)
+    (rf/dispatch [:ui/update-row row])
+    (clj->js row)))
+
+;; App
 (def columns [
               {:field "id" :headerName "ID" :width 100}
               {:field "label" :headerName "Label" :editable true :width 200}
@@ -361,15 +354,16 @@
                                 (set! (.-dependencies row) dependencies))
                               row)
                }])
+
 (defui app []
-
-
   (let [selected-task (urf/use-subscribe [:app/selected-task])
-        editing? (urf/use-subscribe [:ui/editing-text])
-        ]
+        editing? (urf/use-subscribe [:ui/editing-text])]
+
+    ; delete key handling
     (uix/use-effect
      (fn []
        (let [handle-keydown (fn [event]
+                              (println "keydown event" (.-key event))
                               (when (or (= (.-key event) "Delete")
                                         (= (.-key event) "Backspace"))
                                 (cond (not editing?)
@@ -407,14 +401,8 @@
                        :onProcessRowUpdateError (fn [error] (print error))
                        })))))
 
-(comment
-  @(rf/subscribe [:app/tasks])
-  @(rf/subscribe [:app/selected-task])
-  )
-
 (defonce root
   (uix.dom/create-root (js/document.getElementById "root")))
-
 
 (defn ^:dev/after-load init []
   (rf/dispatch-sync [:initialize-db])
