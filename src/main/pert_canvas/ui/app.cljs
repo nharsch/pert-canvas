@@ -1,14 +1,24 @@
 (ns pert-canvas.ui.app
   (:require [clojure.string :as str]
+            [clojure.set :refer [difference union]]
             [uix.core :as uix :refer [defui $]]
             [uix.dom]
             [uix.re-frame :as urf]
             [re-frame.core :as rf]
             [day8.re-frame.undo :as undo :refer [undoable]]
+            [malli.core :as m]
+            [malli.error :as me]
+            ;; JS
             ["@xyflow/react" :refer [ReactFlow Background Controls]]
             ["@dagrejs/dagre" :as Dagre]
             ["@mui/x-data-grid" :refer [DataGrid]]
             ))
+
+(def state-task
+  [:map
+   [:id :int]
+   [:label :string]
+   [:dependencies [:set :int]]])
 
 (def initial-tasks
   [
@@ -18,23 +28,23 @@
    {:id 2
     :label "Mix Ingredients"
     :description "Mix Ingredients"
-    :dependencies [1]}
+    :dependencies #{1}}
    {:id 3
     :label "place dough on pan"
     :description ""
-    :dependencies [2]}
+    :dependencies #{2}}
    {:id 4
     :label "Bake dough"
     :description ""
-    :dependencies [3 5]}
+    :dependencies #{3 5}}
    {:id 5
     :label "Preheat Oven"
     :description ""
-    :dependencies []}
+    :dependencies #{}}
    {:id 6
     :label "Eat Cookies"
     :description ""
-    :dependencies [4]}
+    :dependencies #{4}}
    ])
 
 (def initial-state
@@ -51,7 +61,7 @@
 
 (defn remove-dep-from-row [dep-id row]
   (let [dependencies (:dependencies row)]
-    (assoc row :dependencies (remove #(= (int %) (int dep-id)) dependencies))))
+    (assoc row :dependencies (difference dependencies #{dep-id}))))
 
 
 (def get-layouted-nodes
@@ -140,7 +150,11 @@
                          %) tasks)))))
 
 (defn parse-dependencies [val]
-  (mapv int (str/split val #",\s*")))
+  (if (str/blank? val)
+    #{}
+    (->> (str/split val #",\s*")
+         (map int)
+         (set))))
 
 (def mark-nodes-selected
   (memoize
@@ -217,7 +231,7 @@
    (update-in db [:app/tasks]
               (fn [tasks]
                 (map #(if (= (:id %) (int target-id))
-                        (update % :dependencies conj source-id)
+                        (update % :dependencies union #{(int source-id)})
                         %) tasks)))))
 
 (rf/reg-event-db
@@ -225,10 +239,24 @@
  (undoable "update task row")
  (fn [db [_ row]]
    ;; (println "update-row" row)
-   (update-in db [:app/tasks]
-              (fn [tasks]
-                (map #(if (= (:id %) (:id row)) row %) tasks)))))
+   ;; (println "update-row" row)
+   (if
+       (m/validate state-task row)
+       (update-in db [:app/tasks]
+                  (fn [tasks]
+                    (map #(if (= (:id %) (:id row)) row %) tasks)))
+       (println (:errors (m/explain state-task row))))))
 
+
+
+(comment
+  (me/humanize (m/explain
+                state-task
+                      {:id 0
+                       :label "Initial Task"
+                       :description "This is an initial task"
+                       :dependencies #{}}))
+  )
 
 (rf/reg-event-db
  :ui/delete-selected
@@ -255,7 +283,7 @@
          new-task {:id new-id
                    :label (str "Node " new-id)
                    :description (str "Node " new-id " description")
-                   :dependencies []}]
+                   :dependencies #{}}]
      (-> db
          (update-in [:app/tasks] conj new-task)
          (assoc :app/selected-task new-id)))))
@@ -285,7 +313,6 @@
  (fn [db _]
    ;; (println "sub :ui/editing-text")
    (:ui/editing-text db)))
-
 
 (rf/reg-sub
  :reactflow/edges
@@ -336,16 +363,19 @@
  :datagrid/rows
  :<- [:app/tasks]
  (fn [tasks _]
-   (println ":datagrid/rows")
+   ;; (println ":datagrid/rows")
    (clj->js tasks)))
 
 
 (defn handle-row-update [js-row]
   ;; TODO: validate row before dispatching
-  (let [row (js->clj js-row :keywordize-keys true)]
-    (println "handle-row-update" row)
+  (let [row (-> js-row
+                (js->clj :keywordize-keys true)
+                (update :dependencies set))]
+    ;; (println "handle-row-update" row)
     (rf/dispatch [:ui/update-row row])
     (clj->js row)))
+
 
 ;; App
 (def columns [
@@ -355,7 +385,7 @@
               {:field "dependencies" :headerName "Dependencies" :editable true :width 300
                :valueGetter (fn [_, row] (str/join ", " (.. row -dependencies)))
                :valueSetter (fn [val, row]
-                              (let [dependencies (parse-dependencies val)]
+                              (let [dependencies (clj->js (parse-dependencies val))]
                                 (set! (.-dependencies row) dependencies))
                               row)
                }])
@@ -374,7 +404,6 @@
      (fn []
        (let [handle-keydown
              (fn [event]
-               (println "keydown event" (.-key event))
                (let [meta-key (or (.-metaKey event) (.-ctrlKey event))]
                  ; undo / redo
                  (when (and meta-key (= (.-key event) "z"))
