@@ -223,6 +223,7 @@
    (assoc db :app/selected-edge edge-id
           :app/selected-task nil)))
 
+;; undoable events
 (rf/reg-event-db
  :ui/create-connection
  (undoable "create connection")
@@ -238,7 +239,6 @@
  :ui/update-row
  (undoable "update task row")
  (fn [db [_ row]]
-   ;; (println "update-row" row)
    ;; (println "update-row" row)
    (if
        (m/validate state-task row)
