@@ -1,9 +1,10 @@
 (ns pert-canvas.ui.app
-  (:require [uix.core :as uix :refer [defui $]]
+  (:require [clojure.string :as str]
+            [uix.core :as uix :refer [defui $]]
             [uix.dom]
             [uix.re-frame :as urf]
             [re-frame.core :as rf]
-            [clojure.string :as str]
+            [day8.re-frame.undo :as undo :refer [undoable]]
             ["@xyflow/react" :refer [ReactFlow Background Controls]]
             ["@dagrejs/dagre" :as Dagre]
             ["@mui/x-data-grid" :refer [DataGrid]]
@@ -13,27 +14,27 @@
   [
    {:id 1
     :label "Buy Ingredients"
-    :description "Node 1 description"}
+    :description "Buy Ingredients"}
    {:id 2
     :label "Mix Ingredients"
-    :description "Node 2 description"
+    :description "Mix Ingredients"
     :dependencies [1]}
    {:id 3
     :label "place dough on pan"
-    :description "Node 3 description"
+    :description ""
     :dependencies [2]}
    {:id 4
     :label "Bake dough"
-    :description "Node 4 description"
-    :dependencies [2]}
+    :description ""
+    :dependencies [3 5]}
    {:id 5
-    :label "preheat oven"
-    :description "Node 5 description"
-    :dependencies [3]}
+    :label "Preheat Oven"
+    :description ""
+    :dependencies []}
    {:id 6
-    :label "eat cookies"
-    :description "Node 6 description"
-    :dependencies [4 5]}
+    :label "Eat Cookies"
+    :description ""
+    :dependencies [4]}
    ])
 
 (def initial-state
@@ -201,9 +202,16 @@
    ;; (println "unselect-row" id)
    (assoc db :app/selected-task nil)))
 
+(rf/reg-event-db
+ :ui/select-edge
+ (fn [db [_ edge-id]]
+   ;; (println "select-edge" edge-id)
+   (assoc db :app/selected-edge edge-id
+          :app/selected-task nil)))
 
 (rf/reg-event-db
  :ui/create-connection
+ (undoable "create connection")
  (fn [db [_ source-id target-id]]
    ;; (println "create-connection" source-id target-id)
    (update-in db [:app/tasks]
@@ -214,21 +222,17 @@
 
 (rf/reg-event-db
  :ui/update-row
+ (undoable "update task row")
  (fn [db [_ row]]
    ;; (println "update-row" row)
    (update-in db [:app/tasks]
               (fn [tasks]
                 (map #(if (= (:id %) (:id row)) row %) tasks)))))
 
-(rf/reg-event-db
- :ui/select-edge
- (fn [db [_ edge-id]]
-   ;; (println "select-edge" edge-id)
-   (assoc db :app/selected-edge edge-id
-          :app/selected-task nil)))
 
 (rf/reg-event-db
  :ui/delete-selected
+ (undoable "delete")
  (fn [db _]
    ;; (println "delete-selected" (:app/selected-task db) (:app/selected-edge db))
    (let [selected-task (:app/selected-task db)
@@ -244,6 +248,7 @@
 
 (rf/reg-event-db
  :ui/add-task
+ (undoable "add task")
  (fn [db _]
    ;; (println "add-task")
    (let [new-id (inc (count (:app/tasks db)))
@@ -357,19 +362,32 @@
 
 (defui app []
   (let [selected-task (urf/use-subscribe [:app/selected-task])
-        editing? (urf/use-subscribe [:ui/editing-text])]
+        editing? (urf/use-subscribe [:ui/editing-text])
+        undo? (urf/use-subscribe [:undos?])
+        redo? (urf/use-subscribe [:redos?])
+        last-undo (last (urf/use-subscribe [:undo-explanations]))
+        last-redo (first (urf/use-subscribe [:redo-explanations]))
+        ]
 
     ; delete key handling
     (uix/use-effect
      (fn []
-       (let [handle-keydown (fn [event]
-                              (println "keydown event" (.-key event))
-                              (when (or (= (.-key event) "Delete")
-                                        (= (.-key event) "Backspace"))
-                                (cond (not editing?)
-                                      (do
-                                        (rf/dispatch [:ui/delete-selected])
-                                        (.preventDefault event)))))]
+       (let [handle-keydown
+             (fn [event]
+               (println "keydown event" (.-key event))
+               (let [meta-key (or (.-metaKey event) (.-ctrlKey event))]
+                 ; undo / redo
+                 (when (and meta-key (= (.-key event) "z"))
+                   (do (.preventDefault event) (rf/dispatch [:undo])))
+                 (when (and meta-key (= (.-key event) "Z"))
+                   (do (.preventDefault event) (rf/dispatch [:redo])))
+                  ; delete / backspace
+                 (when (or (= (.-key event) "Delete")
+                           (= (.-key event) "Backspace"))
+                   (cond (not editing?)
+                         (do
+                           (rf/dispatch [:ui/delete-selected])
+                           (.preventDefault event))))))]
          (.addEventListener js/document "keydown" handle-keydown)
          ;; Cleanup function
          #(.removeEventListener js/document "keydown" handle-keydown)))
@@ -383,12 +401,21 @@
              ($ Background nil)
              ($ Controls nil)))
        ($ :p nil "Active task is " selected-task)
-       ($ :div {:style {:display "block"
-                        :height "50vh"
-                        :width "100%"}}
+       ($ :div nil
           ($ :button {:onClick #(rf/dispatch [:ui/add-task])
                       :style {:margin "10px"}}
              "Add Task")
+          (cond undo?
+               ($ :button {:onClick #(rf/dispatch [:undo])
+                           :style {:margin "10px"}}
+                  (str "↶ undo " last-undo)))
+          (cond redo?
+               ($ :button {:onClick #(rf/dispatch [:redo])
+                           :style {:margin "10px"}}
+                  (str "↷ redo " last-redo))))
+       ($ :div {:style {:display "block"
+                        :height "50vh"
+                        :width "100%"}}
           ;; TODO: consider recomputing DataGrid config as reactive sub
           ($ DataGrid {
                        :rows (urf/use-subscribe [:datagrid/rows])
@@ -404,6 +431,10 @@
 (defonce root
   (uix.dom/create-root (js/document.getElementById "root")))
 
-(defn ^:dev/after-load init []
+(defn init []
   (rf/dispatch-sync [:initialize-db])
+  (uix.dom/render-root ($ app) root))
+
+(defn ^:dev/after-load after-reload []
+  (rf/clear-subscription-cache!)
   (uix.dom/render-root ($ app) root))
