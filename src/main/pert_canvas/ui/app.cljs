@@ -12,6 +12,9 @@
             ["@xyflow/react" :refer [ReactFlow Background Controls]]
             ["@dagrejs/dagre" :as Dagre]
             ["@mui/x-data-grid" :refer [DataGrid]]
+            ;; local
+            [pert-canvas.ui.components.csv-drop-zone :refer [drop-zone]]
+            [pert-canvas.ui.components.csv-import-modal :refer [csv-import-modal]]
             ))
 
 (def state-task
@@ -164,6 +167,7 @@
              %)
           nodes))))
 
+;; TODO: migrate to events ns
 ;; Re-frame events and subscriptions
 (rf/reg-event-fx
  :initialize-db
@@ -288,6 +292,96 @@
          (update-in [:app/tasks] conj new-task)
          (assoc :app/selected-task new-id)))))
 
+(rf/reg-event-db
+ :csv/set-drag-over
+ (fn [db [_ drag-over?]]
+   (println "set-drag-over" drag-over?)
+   (assoc db :csv/drag-over drag-over?)))
+
+(rf/reg-event-fx
+ :csv/file-dropped
+ (fn [{:keys [db]} [_ file]]
+   (println "csv/file-dropped" (.-name file))
+   (let [reader (js/FileReader.)]
+     (set! (.-onload reader)
+           (fn [e]
+             (let [csv-content (-> e .-target .-result)]
+               (rf/dispatch [:csv/parse-and-show-modal csv-content (.-name file)]))))
+     (.readAsText reader file)
+     {:db (assoc db :csv/drag-over false)})))
+
+(rf/reg-event-db
+ :csv/parse-and-show-modal
+ (fn [db [_ csv-content filename]]
+   (let [lines (str/split-lines csv-content)
+         headers (when (seq lines)
+                   (str/split (first lines) #","))
+         sample-rows (take 3 (rest lines))]
+     (-> db
+         (assoc :csv/modal-open true)
+         (assoc :csv/filename filename)
+         (assoc :csv/headers headers)
+         (assoc :csv/sample-rows sample-rows)
+         (assoc :csv/raw-content csv-content)
+         (assoc :csv/column-mapping {:id nil :label nil :dependencies nil})))))
+
+(rf/reg-event-db
+ :csv/set-column-mapping
+ (fn [db [_ field column]]
+   (assoc-in db [:csv/column-mapping field] column)))
+
+(rf/reg-event-db
+ :csv/close-modal
+ (fn [db _]
+   (-> db
+       (dissoc :csv/modal-open)
+       (dissoc :csv/filename)
+       (dissoc :csv/headers)
+       (dissoc :csv/sample-rows)
+       (dissoc :csv/raw-content)
+       (dissoc :csv/column-mapping))))
+
+
+;; TODO: use a CSV parser that returns maps for rows
+(rf/reg-event-fx
+ :csv/import-tasks
+ (fn [{:keys [db]} _]
+   (println "csv/import-tasks")
+   (let [csv-content (:csv/raw-content db)
+         column-mapping (:csv/column-mapping db)
+         headers (:csv/headers db)]
+     (when (and csv-content column-mapping headers)
+       (let [header-indices (into {} (map-indexed #(vector %2 %1) headers))
+             id-idx (get header-indices (:id column-mapping))
+             label-idx (get header-indices (:label column-mapping))
+             deps-idx (get header-indices (:dependencies column-mapping))
+             lines (rest (str/split-lines csv-content))
+             tasks (for [line lines
+                        :let [cells (str/split line #",")
+                              id (when id-idx (nth cells id-idx nil))
+                              label (when label-idx (nth cells label-idx nil))
+                              deps-str (when deps-idx (nth cells deps-idx nil))
+                              dependencies (when deps-str
+                                           (->> (str/split deps-str #"[;,|]")
+                                                (map str/trim)
+                                                ;; return only integers in text
+                                                ;; TODO: handle differntly labelled deps, outside of CSV scope for now
+                                                (map #(when (re-matches #"\d+" %)
+                                                        (js/parseInt %)))
+                                                (filter seq)
+                                                vec))]
+                        :when (and id (seq id))]
+                    {:id (js/parseInt (str/trim id))
+                     :label (or (when label (str/trim label)) (str/trim id))
+                     :dependencies (or dependencies [])})]
+         {:fx [[:dispatch [:csv/close-modal]]
+               [:dispatch [:tasks/import-from-csv tasks]]]})))))
+
+(rf/reg-event-db
+ :tasks/import-from-csv
+ (fn [db [_ imported-tasks]]
+   ;; Merge with existing tasks or replace - adjust based on your needs
+   (assoc db :app/tasks (vec imported-tasks))))
 
 (rf/reg-sub
  :app/selected-task
@@ -366,6 +460,41 @@
    ;; (println ":datagrid/rows")
    (clj->js tasks)))
 
+(rf/reg-sub
+ :csv/drag-over
+ (fn [db _]
+   (:csv/drag-over db)))
+
+(rf/reg-sub
+ :csv/modal-open
+ (fn [db _]
+   (:csv/modal-open db)))
+
+(rf/reg-sub
+ :csv/filename
+ (fn [db _]
+   (:csv/filename db)))
+
+(rf/reg-sub
+ :csv/headers
+ (fn [db _]
+   (:csv/headers db)))
+
+(rf/reg-sub
+ :csv/sample-rows
+ (fn [db _]
+   (:csv/sample-rows db)))
+
+(rf/reg-sub
+ :csv/column-mapping
+ (fn [db _]
+   (:csv/column-mapping db)))
+
+(rf/reg-sub
+ :csv/mapping-valid?
+ :<- [:csv/column-mapping]
+ (fn [mapping _]
+   (and (:id mapping) (:label mapping))))
 
 (defn handle-row-update [js-row]
   ;; TODO: validate row before dispatching
@@ -399,18 +528,18 @@
         last-redo (first (urf/use-subscribe [:redo-explanations]))
         ]
 
-    ; delete key handling
+                                        ; delete key handling
     (uix/use-effect
      (fn []
        (let [handle-keydown
              (fn [event]
                (let [meta-key (or (.-metaKey event) (.-ctrlKey event))]
-                 ; undo / redo
+                                        ; undo / redo
                  (when (and meta-key (= (.-key event) "z"))
                    (do (.preventDefault event) (rf/dispatch [:undo])))
                  (when (and meta-key (= (.-key event) "Z"))
                    (do (.preventDefault event) (rf/dispatch [:redo])))
-                  ; delete / backspace
+                                        ; delete / backspace
                  (when (or (= (.-key event) "Delete")
                            (= (.-key event) "Backspace"))
                    (cond (not editing?)
@@ -422,7 +551,7 @@
          #(.removeEventListener js/document "keydown" handle-keydown)))
      [editing?])
 
-    ; UI
+                                        ; UI
     ($ :div {:style {:height "60vh" :width "100%"}}
        ($ :h1 nil "PERT Canvas")
        ($ :div {:style {:height "50vh"}}
@@ -435,13 +564,13 @@
                       :style {:margin "10px"}}
              "Add Task")
           (cond undo?
-               ($ :button {:onClick #(rf/dispatch [:undo])
-                           :style {:margin "10px"}}
-                  (str "↶ undo " last-undo)))
+                ($ :button {:onClick #(rf/dispatch [:undo])
+                            :style {:margin "10px"}}
+                   (str "↶ undo " last-undo)))
           (cond redo?
-               ($ :button {:onClick #(rf/dispatch [:redo])
-                           :style {:margin "10px"}}
-                  (str "↷ redo " last-redo))))
+                ($ :button {:onClick #(rf/dispatch [:redo])
+                            :style {:margin "10px"}}
+                   (str "↷ redo " last-redo))))
        ($ :div {:style {:display "block"
                         :height "50vh"
                         :width "100%"}}
@@ -455,7 +584,11 @@
                        :onCellEditStart #(rf/dispatch [:ui/edit-row-start (int (.-id %))])
                        :onCellEditStop #(rf/dispatch [:ui/edit-row-end (int (.-id %))])
                        :onProcessRowUpdateError (fn [error] (print error))
-                       })))))
+                       }))
+       ($ drop-zone nil)
+       ($ csv-import-modal nil)
+       )
+    ))
 
 (defonce root
   (uix.dom/create-root (js/document.getElementById "root")))
