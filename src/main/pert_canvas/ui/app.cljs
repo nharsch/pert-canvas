@@ -8,6 +8,8 @@
             [day8.re-frame.undo :as undo :refer [undoable]]
             [malli.core :as m]
             [malli.error :as me]
+            [goog.labs.format.csv :as csv]
+            [semantic-csv.core :as sc]
             ;; JS
             ["@xyflow/react" :refer [ReactFlow Background Controls]]
             ["@dagrejs/dagre" :as Dagre]
@@ -16,6 +18,8 @@
             [pert-canvas.ui.components.csv-drop-zone :refer [drop-zone]]
             [pert-canvas.ui.components.csv-import-modal :refer [csv-import-modal]]
             ))
+
+
 
 (def state-task
   [:map
@@ -58,6 +62,89 @@
    })
 
 ;; Utils
+
+(comment
+  (remap-headers
+   {:task-id 1
+    :task-description "Task A2"
+    :deps "3;4"}
+   {:task-id :id
+    :task-description :description
+    :deps :dependencies})
+  (remap-headers
+   {:task-id 1
+    :task-description "Task A2"
+    :deps "3;4"})
+  (remap-headers
+   {:task-id 1
+    :task-description "Task A2"
+    :deps "3;4"}
+   {})
+  (remap-headers
+   {:task-id 1
+    :task-description "Task A2"
+    :deps "3;4"}
+   {:dumb-key :dumb-value})
+  (remap-headers
+   {:task-id 1
+    :task-description "Task A2"
+    :deps "3;4"}
+   {:deps :dependencies})
+  )
+
+
+(defn remap-headers
+  ([row-map] row-map)
+  ([row-map column-mapping]
+   (let [column-mapping (clojure.set/map-invert column-mapping)]
+     (reduce-kv (fn [acc k v]
+                  (if-let [new-key (get column-mapping k)]
+                    (assoc acc new-key v)
+                    (assoc acc k v)))
+                {}
+                row-map))))
+
+(defn parse-deps [row-map]
+  (let [deps (:dependencies row-map)]
+    (if (string? deps)
+      (let [deps-list (str/split deps #"[;,|]")]
+        (assoc row-map
+               :dependencies
+               (->> deps-list
+                    (map str/trim)
+                    (mapv js/parseInt)
+                    )))
+      row-map)))
+
+(defn csv->tasks
+  ([csv-string] (csv->tasks csv-string {}))
+  ([csv-string column-mapping]
+   (->> csv-string
+        csv/parse
+        js->clj
+        ;; sc/remove-comments
+        sc/mappify
+        doall
+        (map #(remap-headers % column-mapping))
+        (mapv parse-deps)
+        )))
+
+(comment
+  (def csv-string  (str "\"#\",\"description\",\"deps\"\n1,\"Task A2\",3;4\n2,Task B,4|5\n3,Task C,6\n4,Task D,\n5,Task E,\n6,Task F,"))
+
+  (csv->tasks csv-string)
+  (csv->tasks csv-string {:deps :dependencies})
+  )
+
+(defn keywordize-values [m]
+  (reduce-kv (fn [acc k v]
+               (assoc acc k (if (string? v)
+                              (keyword v)
+                              v)))
+             {}
+             m))
+
+
 (defn edgeid->ids [edge-id]
   (let [[_ source-id target-id] (str/split edge-id #"-")]
     (map int [source-id target-id])))
@@ -310,12 +397,13 @@
      (.readAsText reader file)
      {:db (assoc db :csv/drag-over false)})))
 
+
 (rf/reg-event-db
  :csv/parse-and-show-modal
  (fn [db [_ csv-content filename]]
-   (let [lines (str/split-lines csv-content)
-         headers (when (seq lines)
-                   (str/split (first lines) #","))
+   ;; TODO use CSV parser for this
+   (let [lines (csv/parse csv-content)
+         headers (first lines)
          sample-rows (take 3 (rest lines))]
      (-> db
          (assoc :csv/modal-open true)
@@ -342,40 +430,25 @@
        (dissoc :csv/column-mapping))))
 
 
-;; TODO: use a CSV parser that returns maps for rows
+
+;; TODO: move to a separate namespace
 (rf/reg-event-fx
  :csv/import-tasks
  (fn [{:keys [db]} _]
-   (println "csv/import-tasks")
+   (println csv/import-tasks)
    (let [csv-content (:csv/raw-content db)
-         column-mapping (:csv/column-mapping db)
+         column-mapping (keywordize-values (:csv/column-mapping db))
          headers (:csv/headers db)]
      (when (and csv-content column-mapping headers)
-       (let [header-indices (into {} (map-indexed #(vector %2 %1) headers))
-             id-idx (get header-indices (:id column-mapping))
-             label-idx (get header-indices (:label column-mapping))
-             deps-idx (get header-indices (:dependencies column-mapping))
-             lines (rest (str/split-lines csv-content))
-             tasks (for [line lines
-                        :let [cells (str/split line #",")
-                              id (when id-idx (nth cells id-idx nil))
-                              label (when label-idx (nth cells label-idx nil))
-                              deps-str (when deps-idx (nth cells deps-idx nil))
-                              dependencies (when deps-str
-                                           (->> (str/split deps-str #"[;,|]")
-                                                (map str/trim)
-                                                ;; return only integers in text
-                                                ;; TODO: handle differntly labelled deps, outside of CSV scope for now
-                                                (map #(when (re-matches #"\d+" %)
-                                                        (js/parseInt %)))
-                                                (filter seq)
-                                                vec))]
-                        :when (and id (seq id))]
-                    {:id (js/parseInt (str/trim id))
-                     :label (or (when label (str/trim label)) (str/trim id))
-                     :dependencies (or dependencies [])})]
+       (let [tasks (csv->tasks csv-content column-mapping)]
+         (println "column-mapping:" column-mapping)
+         (println "Parsed tasks:" (first tasks))
+         ;; (println "ID" (:id (first tasks)))
+         ;; (println "deps" (:dependencies (first tasks)))
+         ;; (println "label" (:label (first tasks)))
          {:fx [[:dispatch [:csv/close-modal]]
-               [:dispatch [:tasks/import-from-csv tasks]]]})))))
+               [:dispatch [:tasks/import-from-csv tasks]]]}
+         )))))
 
 (rf/reg-event-db
  :tasks/import-from-csv
@@ -394,7 +467,6 @@
  (fn [db _]
    ;; (println "sub :app/selected-edge")
    (:app/selected-edge db)))
-
 
 (rf/reg-sub
  :app/tasks
@@ -600,3 +672,8 @@
 (defn ^:dev/after-load after-reload []
   (rf/clear-subscription-cache!)
   (uix.dom/render-root ($ app) root))
+
+(comment
+  (:csv/headers @re-frame.db/app-db)
+  @re-frame.db/app-db
+  )

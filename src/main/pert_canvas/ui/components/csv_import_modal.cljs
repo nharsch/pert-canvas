@@ -35,6 +35,16 @@
                      ($ mui/TableCell {:key idx}
                         (clojure.string/trim cell))))))))))
 
+
+
+
+
+
+
+
+
+(:csv/csv-headers @re-frame.db/app-db)
+
 (defui csv-import-modal []
   (let [open? (urf/use-subscribe [:csv/modal-open])
         filename (urf/use-subscribe [:csv/filename])
