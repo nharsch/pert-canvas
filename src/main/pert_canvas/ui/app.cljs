@@ -93,6 +93,7 @@
   )
 
 
+
 (defn remap-headers
   ([row-map] row-map)
   ([row-map column-mapping]
@@ -104,17 +105,43 @@
                 {}
                 row-map))))
 
-(defn parse-deps [row-map]
+(defn dep-str->int [dep-str]
+  (let [found-id (re-find #"[0-9]+" dep-str)]
+    (cond found-id
+      (int found-id))))
+
+(comment
+  (dep-str->int "3")
+  (dep-str->int "")
+  (dep-str->int "test")
+  (dep-str->int "test 123")
+  (dep-str->int "test 123 test 324")
+  )
+
+(defn parse-incoming-deps [row-map]
   (let [deps (:dependencies row-map)]
     (if (string? deps)
       (let [deps-list (str/split deps #"[;,|]")]
+        (println deps-list)
         (assoc row-map
                :dependencies
-               (->> deps-list
-                    (map str/trim)
-                    (mapv js/parseInt)
-                    )))
+               (set (keep dep-str->int deps-list))))
       row-map)))
+
+;; regex to extract first int from string
+
+(comment
+  (parse-incoming-deps {:dependencies "test 123"})
+  (parse-incoming-deps {:dependencies "test"})
+  )
+
+(defn deps-csv->set [val]
+  (if (str/blank? val)
+    #{}
+    (or
+     (->> (str/split val #",\s*")
+          (map int)
+          (set)))))
 
 (defn csv->tasks
   ([csv-string] (csv->tasks csv-string {}))
@@ -126,7 +153,7 @@
         sc/mappify
         doall
         (map #(remap-headers % column-mapping))
-        (mapv parse-deps)
+        (mapv parse-incoming-deps)
         )))
 
 (comment
@@ -239,12 +266,7 @@
                            (remove-dep-from-row target-id %))
                          %) tasks)))))
 
-(defn parse-dependencies [val]
-  (if (str/blank? val)
-    #{}
-    (->> (str/split val #",\s*")
-         (map int)
-         (set))))
+
 
 (def mark-nodes-selected
   (memoize
@@ -442,13 +464,14 @@
      (when (and csv-content column-mapping headers)
        (let [tasks (csv->tasks csv-content column-mapping)]
          (println "column-mapping:" column-mapping)
-         (println "Parsed tasks:" (first tasks))
+         (println "Parsed tasks:" (:dependencies (first tasks)))
          ;; (println "ID" (:id (first tasks)))
          ;; (println "deps" (:dependencies (first tasks)))
          ;; (println "label" (:label (first tasks)))
          {:fx [[:dispatch [:csv/close-modal]]
                [:dispatch [:tasks/import-from-csv tasks]]]}
          )))))
+
 
 (rf/reg-event-db
  :tasks/import-from-csv
@@ -586,7 +609,7 @@
               {:field "dependencies" :headerName "Dependencies" :editable true :width 300
                :valueGetter (fn [_, row] (str/join ", " (.. row -dependencies)))
                :valueSetter (fn [val, row]
-                              (let [dependencies (clj->js (parse-dependencies val))]
+                              (let [dependencies (clj->js (deps-csv->set val))]
                                 (set! (.-dependencies row) dependencies))
                               row)
                }])
@@ -676,4 +699,6 @@
 (comment
   (:csv/headers @re-frame.db/app-db)
   @re-frame.db/app-db
+  (get-in @re-frame.db/app-db [:app/tasks 0 :dependencies])
+  (first @(rf/subscribe [:datagrid/rows]))
   )
