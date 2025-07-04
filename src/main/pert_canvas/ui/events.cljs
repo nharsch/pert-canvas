@@ -111,7 +111,7 @@
  :ui/update-row
  (undoable "update task row")
  (fn [db [_ row]]
-   ;; (println "update-row" row)
+   (println "update-row" row)
    (if
        (m/validate state-task row)
        (update-in db [:app/tasks]
@@ -202,9 +202,6 @@
        (dissoc :csv/raw-content)
        (dissoc :csv/column-mapping))))
 
-
-
-;; TODO: move to a separate namespace
 (rf/reg-event-fx
  :csv/import-tasks
  (fn [{:keys [db]} _]
@@ -223,6 +220,7 @@
 
 (rf/reg-event-db
  :tasks/import-from-csv
+ (undoable "import tasks from CSV")
  (fn [db [_ imported-tasks]]
    ;; Merge with existing tasks or replace - adjust based on your needs
    (assoc db :app/tasks (vec imported-tasks))))

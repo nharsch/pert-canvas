@@ -29,8 +29,7 @@
 
 
 ;; App
-(def columns [
-              {:field "id" :headerName "ID" :width 100}
+(def columns [{:field "id" :headerName "ID" :width 100}
               {:field "label" :headerName "Label" :editable true :width 200}
               {:field "description" :headerName "Description" :editable true :width 300}
               {:field "dependencies" :headerName "Dependencies" :editable true :width 300
@@ -38,8 +37,8 @@
                :valueSetter (fn [val, row]
                               (let [dependencies (clj->js (deps-csv->set val))]
                                 (set! (.-dependencies row) dependencies))
-                              row)
-               }])
+                              row)}
+              ])
 
 (defui app []
   (let [selected-task (urf/use-subscribe [:app/selected-task])
@@ -47,10 +46,9 @@
         undo? (urf/use-subscribe [:undos?])
         redo? (urf/use-subscribe [:redos?])
         last-undo (last (urf/use-subscribe [:undo-explanations]))
-        last-redo (first (urf/use-subscribe [:redo-explanations]))
-        ]
-    ; delete key handling
-    (uix/use-effect
+        last-redo (first (urf/use-subscribe [:redo-explanations]))]
+
+    (uix/use-effect  ; delete key handling
      (fn []
        (let [handle-keydown
              (fn [event]
