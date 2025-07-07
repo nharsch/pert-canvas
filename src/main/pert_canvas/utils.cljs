@@ -24,15 +24,12 @@
     (cond found-id
           (int found-id))))
 
-(defn parse-incoming-deps [row-map]
-  (let [deps (:dependencies row-map)]
-    (if (string? deps)
-      (let [deps-list (str/split deps #"[;,|]")]
-        (println deps-list)
-        (assoc row-map
-               :dependencies
-               (set (keep dep-str->int deps-list))))
-      row-map)))
+(defn parse-incoming-deps [deps]
+  (if (string? deps)
+    (let [deps-list (str/split deps #"[;,|]")]
+      ;; (println deps-list)
+      (set (keep dep-str->int deps-list)))
+    deps))
 
 (defn deps-csv->set [val]
   (if (str/blank? val)
@@ -65,12 +62,17 @@
    (->> csv-string
         csv/parse
         js->clj
-        ;; sc/remove-comments
         sc/mappify
+        (sc/cast-with js/parseInt {:only [(:id column-mapping)]})
+        (sc/cast-with parse-incoming-deps {:only (:dependencies column-mapping)})
         doall
-        (map #(remap-headers % column-mapping))
-        (mapv parse-incoming-deps)
+        (mapv #(remap-headers % column-mapping))
         )))
+
+(comment
+  (js/parseInt " 45")
+  (csv->tasks )
+  )
 
 ;; layout
 (defn state-task->canvas-node [state-task]

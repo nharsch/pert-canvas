@@ -6,6 +6,8 @@
    [:label :string]
    [:dependencies [:set :int]]])
 
+(def state-tasks
+  [:vector state-task])
 
 (def initial-tasks
   [

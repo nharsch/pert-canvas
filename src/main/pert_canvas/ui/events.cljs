@@ -10,13 +10,13 @@
                               csv->tasks
                               remove-dep-from-row
                               edgeid->ids]]
-   [pert-canvas.ui.state :refer [initial-state state-task]]))
+   [pert-canvas.ui.state :refer [initial-state state-task state-tasks]]))
 
 
 ;; TODO: move to a separate state namespace?
 (defn delete-task-from-db
   [db task-id]
-  (println "delete-task" task-id)
+  ;; (println "delete-task" task-id)
   (let [new-tasks
         (update db :app/tasks
                 (fn [tasks]
@@ -25,7 +25,7 @@
 
 (defn delete-edge-from-db
   [db edge-id]
-  (println "delete-edge" edge-id)
+  ;; (println "delete-edge" edge-id)
   (let [[source-id target-id] (edgeid->ids edge-id)]
     (println "source-id" source-id "target-id" target-id)
     (update-in db [:app/tasks]
@@ -39,7 +39,7 @@
 
 (rf/reg-event-fx
  :initialize-db
- (println ":initialize-db")
+ ;; (println ":initialize-db")
  (fn [_ _]
    {:db initial-state}))
 
@@ -100,11 +100,13 @@
  :ui/create-connection
  (undoable "create connection")
  (fn [db [_ source-id target-id]]
-   ;; (println "create-connection" source-id target-id)
+   (println "create-connection" source-id target-id)
    (update-in db [:app/tasks]
               (fn [tasks]
                 (map #(if (= (:id %) (int target-id))
-                        (update % :dependencies union #{(int source-id)})
+                        (do
+                          (println "found dep for" target-id source-id)
+                          (update % :dependencies union #{(int source-id)}))
                         %) tasks)))))
 
 (rf/reg-event-db
@@ -222,5 +224,11 @@
  :tasks/import-from-csv
  (undoable "import tasks from CSV")
  (fn [db [_ imported-tasks]]
-   ;; Merge with existing tasks or replace - adjust based on your needs
-   (assoc db :app/tasks (vec imported-tasks))))
+   (if
+       (m/validate state-tasks imported-tasks)
+       ;; Merge with existing tasks or replace - adjust based on your needs
+       (assoc db :app/tasks imported-tasks)
+       ;; TODO: throw error ealier if possible (during modal open)
+       ;; TODO: toast error or some alert
+       (println "CSV import errors: " (:errors (m/explain state-tasks imported-tasks)))
+       )))
