@@ -31,7 +31,7 @@
 ;; App
 (def columns [{:field "id" :headerName "ID" :width 100}
               {:field "label" :headerName "Label" :editable true :width 200}
-              {:field "description" :headerName "Description" :editable true :width 300}
+              ;; {:field "description" :headerName "Description" :editable true :width 300}
               {:field "dependencies" :headerName "Dependencies" :editable true :width 300
                :valueGetter (fn [_, row] (str/join ", " (.. row -dependencies)))
                :valueSetter (fn [val, row]
@@ -70,38 +70,42 @@
          #(.removeEventListener js/document "keydown" handle-keydown)))
      [editing?])
 
-    ($ :div {:style {:height "60vh" :width "100%"}}
-       ($ :h1 nil "PERT Canvas")
-       ($ :div {:style {:height "50vh"}}
-          ($ ReactFlow (urf/use-subscribe [:reactflow/config])
-             ($ Background nil)
-             ($ Controls nil)))
-       ($ :p nil "Active task is " selected-task)
-       ($ :div nil
-          ($ :button {:onClick #(rf/dispatch [:ui/add-task])
-                      :style {:margin "10px"}}
-             "Add Task")
-          (cond undo?
-                ($ :button {:onClick #(rf/dispatch [:undo])
-                            :style {:margin "10px"}}
-                   (str "↶ undo " last-undo)))
-          (cond redo?
-                ($ :button {:onClick #(rf/dispatch [:redo])
-                            :style {:margin "10px"}}
-                   (str "↷ redo " last-redo))))
-       ($ :div {:style {:display "block"
-                        :height "50vh"
-                        :width "100%"}}
-          ($ DataGrid {
-                       :rows (urf/use-subscribe [:datagrid/rows])
-                       :columns (clj->js columns)
-                       :processRowUpdate handle-row-update
-                       :rowSelectionModel (clj->js [selected-task])
-                       :onRowClick #(rf/dispatch [:ui/select-row (int (.-id %))] )
-                       :onCellEditStart #(rf/dispatch [:ui/edit-row-start (int (.-id %))])
-                       :onCellEditStop #(rf/dispatch [:ui/edit-row-end (int (.-id %))])
-                       :onProcessRowUpdateError (fn [error] (print error))
-                       }))
+    ($ :div
+       ($ :h2
+          {:style {:font "1.5em 'Fira Sans', sans-serif"}}
+          "PERT Canvas")
+       ($ :button {:onClick #(rf/dispatch [:ui/add-task])
+                   :style {:margin "10px"}}
+          "Add Task")
+       (cond undo?
+             ($ :button {:onClick #(rf/dispatch [:undo])
+                         :style {:margin "10px"}}
+                (str "↶ undo " last-undo)))
+       (cond redo?
+             ($ :button {:onClick #(rf/dispatch [:redo])
+                         :style {:margin "10px"}}
+                (str "↷ redo " last-redo)))
+
+       ($ :div
+          {:style {:display "flex"
+                   :flex-direction "row"}}
+          ($ :div
+             {:style {:height "80vh"}}
+             ($ DataGrid {
+                          :rows (urf/use-subscribe [:datagrid/rows])
+                          :columns (clj->js columns)
+                          :processRowUpdate handle-row-update
+                          :rowSelectionModel (clj->js [selected-task])
+                          :onRowClick #(rf/dispatch [:ui/select-row (int (.-id %))] )
+                          :onCellEditStart #(rf/dispatch [:ui/edit-row-start (int (.-id %))])
+                          :onCellEditStop #(rf/dispatch [:ui/edit-row-end (int (.-id %))])
+                          :onProcessRowUpdateError (fn [error] (print error))
+                          }))
+          ($ :div {:style {:height "80vh"
+                           :flex "1 1 auto"}}
+             ($ ReactFlow (urf/use-subscribe [:reactflow/config])
+                ($ Background nil)
+                ($ Controls nil))))
        ($ drop-zone nil)
        ($ csv-import-modal nil)
        )
@@ -121,6 +125,6 @@
 (comment
   (:csv/headers @re-frame.db/app-db)
   @re-frame.db/app-db
-  (get-in @re-frame.db/app-db [:app/tasks 0 :dependencies])
-  (first @(rf/subscribe [:datagrid/rows]))
+  (get-in @re-frame.db/app-db [:app/tasks])
+  @(rf/subscribe [:datagrid/rows])
   )

@@ -25,7 +25,7 @@
                         (println "Drag enter")
                         (rf/dispatch [:csv/set-drag-over true]))
         :on-drag-over (fn [e]
-                        ;; (println "Drag over")
+                        (println "Drag over")
                        (.preventDefault e))
         :on-drag-leave (fn [e]
                         (.preventDefault e)
@@ -44,12 +44,14 @@
                       (rf/dispatch [:csv/file-dropped file]))
                     (rf/dispatch [:csv/set-drag-over false])))}
        (when drag-over?
-         ($ :div
+         ($ :h1
             {:style {:background-color "white"
                      :border "3px dashed #ccc"
                      :border-radius "10px"
                      :padding "40px"
                      :text-align "center"
                      :font-size "18px"
-                     :color "#666"}}
+                     :color "#666"
+                     :z-index -2
+                     :pointer-events "none"}}
             "Drop CSV file here to import tasks")))))
