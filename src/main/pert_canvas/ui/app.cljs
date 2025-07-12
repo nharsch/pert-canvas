@@ -71,6 +71,23 @@
      [editing?])
 
     ($ :div
+       {:on-drag-enter (fn [e]
+                        (.preventDefault e)
+                        (rf/dispatch [:csv/set-drag-over true]))
+        :on-drag-over (fn [e]
+                       (.preventDefault e))
+        :on-drag-leave (fn [e]
+                        (.preventDefault e)
+                        (when (= (.-target e) (.-currentTarget e))
+                          (rf/dispatch [:csv/set-drag-over false])))
+        :on-drop (fn [e]
+                  (.preventDefault e)
+                  (let [files (-> e .-dataTransfer .-files)
+                        file (when (> (.-length files) 0)
+                              (aget files 0))]
+                    (when (and file (re-find #"\.csv$" (.-name file)))
+                      (rf/dispatch [:csv/file-dropped file]))
+                    (rf/dispatch [:csv/set-drag-over false])))}
        ($ :h2
           {:style {:font "1.5em 'Fira Sans', sans-serif"}}
           "PERT Canvas")
