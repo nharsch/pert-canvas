@@ -121,8 +121,10 @@
                     (map #(if (= (:id %) (:id row)) row %) tasks)))
        (println (:errors (m/explain state-task row))))))
 
-
-
+(rf/reg-event-db
+ :reactflow/nodes-dims-calc
+ (fn [db [_ nodes]]
+   (assoc db :reactflow/nodes-dims nodes)))
 
 (rf/reg-event-db
  :ui/delete-selected

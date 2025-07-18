@@ -76,37 +76,48 @@
 
 ;; layout
 (defn state-task->canvas-node [state-task]
+  ; TODO: pass into react-flow?
   {:id (str (:id state-task))
    :position {:x 0 :y 0}
    :sourcePosition "right"
    :targetPosition "left"
    :selected (:selected state-task false)
    :dependencies (map str (:dependencies state-task))
-   :data {:id (:id state-task)
+   :data {
+          :id (:id state-task)
           :label (:label state-task)
-          :description (:description state-task)}})
+          :description (:description state-task)
+          }})
+
+
+(defn get-nodes-dims [node nodes-dims]
+    (let [id (:id node)]
+        (if-let [dims (get nodes-dims id)]
+        dims
+        {:width 150 :height 40})))
 
 (def get-layouted-nodes
   "uses Dagre to update positions on nodes"
+  ;; TODO: spec nodes as CanvasNode
   (memoize
-   (fn [nodes edges]
+   (fn [nodes edges nodes-dims]
      (let [g (-> (new (.. Dagre -graphlib -Graph))
                  (.setDefaultEdgeLabel (fn [] #js {})))]
        (.setGraph g #js {:rankdir "LR"})
-
+       ;; set edges
        (doseq [edge edges]
          (.setEdge g (:source edge) (:target edge)))
-
+       ;; set position on dagre
        (doseq [node nodes]
          (.setNode g (:id node)
                    (clj->js (merge node
-                                   {:width (get-in node [:measured :width] 150)
-                                    :height (get-in node [:measured :height] 0)}))))
+                                   (get-nodes-dims node nodes-dims)))))
        (.layout Dagre g)
+       ;; put positions back into nodes
        (map (fn [node]
               (let [position (.node g (:id node))
-                    width (get-in node [:measured :width] 150)
-                    height (get-in node [:measured :height] 0)
+                    width (:width (get-nodes-dims node nodes-dims))
+                    height (:height (get-nodes-dims node nodes-dims))
                     x (- (.-x position) (/ width 2))
                     y (- (.-y position) (/ height 2))]
                 (assoc node :position {:x x :y y})))

@@ -3,6 +3,18 @@
      [re-frame.core :as rf]
      [pert-canvas.utils :refer [get-layouted-nodes state-task->canvas-node]]))
 
+(defn handle-nodes-change [nodes]
+  ;; only handle dimension calcs
+  (let [nodes (js->clj nodes :keywordize-keys true)
+        ;; grab calculated dimensions for each node, convert to map
+        nodes-dims (into {}
+                         (map (fn [node]
+                                [(int (:id node))
+                                 {:width (get-in node [:dimensions :width])
+                                  :height (get-in node [:dimensions :height])}])
+                              nodes))]
+    (rf/dispatch [:reactflow/nodes-dims-calc nodes-dims])))
+
 (def mark-nodes-selected
   (memoize
    (fn [selected-id nodes]
@@ -80,6 +92,7 @@
  :<- [:csv/column-mapping]
  (fn [mapping _]
    (and (:id mapping) (:label mapping))))
+
 (rf/reg-sub
  :app/selected-task
  (fn [db _]
@@ -105,6 +118,11 @@
    (:ui/editing-text db)))
 
 (rf/reg-sub
+ :reactflow/nodes-dims
+ (fn [db _]
+   (:reactflow/nodes-dims db)))
+
+(rf/reg-sub
  :reactflow/edges
  :<- [:app/tasks]
  (fn [tasks _]
@@ -115,10 +133,13 @@
  :reactflow/layouted-nodes
  :<- [:app/tasks]
  :<- [:reactflow/edges]
- (fn [[tasks edges] _]
+ :<- [:reactflow/nodes-dims]
+ (fn [[tasks edges nodes-dims] _]
    ;; (println ":reactflow/layouted-nodes")
    (get-layouted-nodes (map state-task->canvas-node tasks)
-                       edges)))
+                       edges
+                       nodes-dims
+                       )))
 
 (rf/reg-sub
  :reactflow/nodes-with-selected
@@ -145,6 +166,7 @@
      :onConnect #(rf/dispatch [:ui/create-connection (.-source %) (.-target %)])
      :onEdgesChange (fn [edges] (rf/dispatch [:ui/select-edge (.-id (first edges))]))
      ;; :onEdgesDelete (fn [event] (println "on delete: " event))
+     :onNodesChange handle-nodes-change
      :fitView true
      })
    ))
