@@ -82,7 +82,8 @@
    :targetPosition "left"
    :selected (:selected state-task false)
    :dependencies (map str (:dependencies state-task))
-   :data {:label (:label state-task)
+   :data {:id (:id state-task)
+          :label (:label state-task)
           :description (:description state-task)}})
 
 (def get-layouted-nodes

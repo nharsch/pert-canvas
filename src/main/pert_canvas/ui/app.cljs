@@ -29,10 +29,28 @@
 
 
 ;; App
-(def columns [{:field "id" :headerName "ID" :width 100}
-              {:field "label" :headerName "Label" :editable true :width 200}
+(def columns [{
+               :field "id"
+               :headerName "ID"
+               :width 80
+               ;; :maxWidth 150
+               :resizable true
+               }
+              {
+               :field "label"
+               :headerName "Label"
+               :editable true
+               :resizable true
+               :flex 1
+               ;; :minWidth 100
+               }
               ;; {:field "description" :headerName "Description" :editable true :width 300}
-              {:field "dependencies" :headerName "Dependencies" :editable true :width 300
+              {
+               :field "dependencies"
+               :headerName "Dependencies"
+               :editable true
+               ;; :width 100
+               :maxWidth 300
                :valueGetter (fn [_, row] (str/join ", " (.. row -dependencies)))
                :valueSetter (fn [val, row]
                               (let [dependencies (clj->js (deps-csv->set val))]
@@ -107,7 +125,9 @@
           {:style {:display "flex"
                    :flex-direction "row"}}
           ($ :div
-             {:style {:height "80vh"}}
+             {:style {:width "auto"
+                      :maxWidth "40%"
+                      :height "80vh"}}
              ($ DataGrid {
                           :rows (urf/use-subscribe [:datagrid/rows])
                           :columns (clj->js columns)

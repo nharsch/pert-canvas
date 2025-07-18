@@ -11,10 +11,6 @@
              %)
           nodes))))
 
-
-
-
-
 (def tasks->canvas-edges
   (memoize
    (fn [tasks]
@@ -41,7 +37,6 @@
   (->> nodes
        (filter #(= name (:label %)))
        (first)))
-
 
 (rf/reg-sub
  :datagrid/rows
