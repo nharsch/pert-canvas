@@ -81,12 +81,15 @@
    :position {:x 0 :y 0}
    :sourcePosition "right"
    :targetPosition "left"
-   :selected (:selected state-task false)
+
    :dependencies (map str (:dependencies state-task))
    :data {
           :id (:id state-task)
-          :label (:label state-task)
+          :label (str (:id state-task)
+                      ": "
+                      (:label state-task))
           :description (:description state-task)
+          :selected (:selected state-task false)
           }})
 
 

@@ -6,7 +6,7 @@
 (defn handle-nodes-change [nodes]
   ;; only handle dimension calcs
   (let [nodes (js->clj nodes :keywordize-keys true)
-        ;; grab calculated dimensions for each node, convert to map
+        ;; grab calculated dimensions for each node, convert to map {id {:width, :height}}
         nodes-dims (into {}
                          (map (fn [node]
                                 [(int (:id node))
@@ -17,8 +17,8 @@
 
 (def mark-nodes-selected
   (memoize
-   (fn [selected-id nodes]
-     (map #(if (= (:id %) (int selected-id))
+   (fn [nodes selected-id]
+     (map #(if (= (int (:id %)) (int selected-id))
              (assoc % :selected true)
              %)
           nodes))))
@@ -134,29 +134,22 @@
  :<- [:app/tasks]
  :<- [:reactflow/edges]
  :<- [:reactflow/nodes-dims]
- (fn [[tasks edges nodes-dims] _]
-   ;; (println ":reactflow/layouted-nodes")
-   (get-layouted-nodes (map state-task->canvas-node tasks)
-                       edges
-                       nodes-dims
-                       )))
+ :<- [:app/selected-task]
+ (fn [[tasks edges nodes-dims selected-task] _]
+   (println "sub :reactflow/layouted-nodes" selected-task)
+   (-> (map state-task->canvas-node tasks)
+       (mark-nodes-selected selected-task)
+       (get-layouted-nodes edges nodes-dims))))
 
-(rf/reg-sub
- :reactflow/nodes-with-selected
-  :<- [:reactflow/layouted-nodes]
-  :<- [:app/selected-task]
-  (fn [[nodes selected-id] _]
-    ;; (println ":reactflow/nodes-with-selected")
-    (mark-nodes-selected selected-id nodes)))
 
 ;; app
 ;; TODO: make this subscription only update on changes to tasks or selected-task
 (rf/reg-sub
  :reactflow/config
- :<- [:reactflow/nodes-with-selected]
+ :<- [:reactflow/layouted-nodes]
  :<- [:reactflow/edges]
  (fn [[nodes edges] _]
-   (println "sub :reactflow/config")
+   (println "sub :reactflow/config" nodes)
    (clj->js
     {:nodes nodes
      :edges edges
