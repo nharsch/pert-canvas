@@ -234,3 +234,5 @@
        ;; TODO: toast error or some alert
        (println "CSV import errors: " (:errors (m/explain state-tasks imported-tasks)))
        )))
+
+;; TODO: create events for importing from plan.io API
