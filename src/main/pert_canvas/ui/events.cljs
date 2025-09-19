@@ -3,6 +3,8 @@
    [re-frame.core :as rf]
    [day8.re-frame.undo :refer [undoable]]
    [clojure.set :refer [union]]
+   [clojure.string :as str]
+   [cljs.core.async :refer [<!]]
    [goog.labs.format.csv :as csv]
    [malli.core :as m]
    [malli.error :as me]
@@ -10,7 +12,9 @@
                               csv->tasks
                               remove-dep-from-row
                               edgeid->ids]]
-   [pert-canvas.ui.state :refer [initial-state state-task state-tasks]]))
+   [pert-canvas.ui.state :refer [initial-state state-task state-tasks]]
+   [redmine.api :as redmine])
+  (:require-macros [cljs.core.async.macros :refer [go]]))
 
 
 ;; TODO: move to a separate state namespace?
@@ -235,4 +239,59 @@
        (println "CSV import errors: " (:errors (m/explain state-tasks imported-tasks)))
        )))
 
-;; TODO: create events for importing from plan.io API
+;; Plan.io URL handling
+(defn extract-path-from-planio-url 
+  "Extract the path from a full Plan.io URL for API calls"
+  [url]
+  (try
+    (let [url-obj (js/URL. url)
+          path (.-pathname url-obj)
+          search (.-search url-obj)]
+      (str path search))
+    (catch js/Error _
+      ;; If it's not a valid URL, assume it's already a path
+      url)))
+
+(rf/reg-event-db
+ :planio/set-url
+ (fn [db [_ url]]
+   (assoc db :planio/url url)))
+
+(rf/reg-event-db
+ :planio/set-loading
+ (fn [db [_ loading?]]
+   (assoc db :planio/loading loading?)))
+
+(rf/reg-event-fx
+ :planio/fetch-from-url
+ (fn [{:keys [db]} [_ url]]
+   (let [path (extract-path-from-planio-url url)]
+     (println "Fetching from Plan.io path:" path)
+     {:db (assoc db :planio/loading true)
+      :fx [[:dispatch [:planio/make-api-request path]]]})))
+
+(rf/reg-event-fx
+ :planio/make-api-request
+ (fn [{:keys [db]} [_ path]]
+   (go
+     (let [response (<! (redmine/http-get (redmine/api-url path)))]
+       (if (:success response)
+         (rf/dispatch [:planio/fetch-success (:body response)])
+         (rf/dispatch [:planio/fetch-error (:error response)]))))
+   {}))
+
+(rf/reg-event-db
+ :planio/fetch-success
+ (fn [db [_ response-data]]
+   (println "Plan.io fetch success:" response-data)
+   (-> db
+       (assoc :planio/loading false)
+       (assoc :planio/last-response response-data))))
+
+(rf/reg-event-db
+ :planio/fetch-error
+ (fn [db [_ error]]
+   (println "Plan.io fetch error:" error)
+   (-> db
+       (assoc :planio/loading false)
+       (assoc :planio/error error))))

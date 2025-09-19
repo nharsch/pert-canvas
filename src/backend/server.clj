@@ -1,7 +1,6 @@
 (ns server
   (:require [ring.adapter.jetty :refer [run-jetty]]
             [ring.middleware.json :refer [wrap-json-body wrap-json-response]]
-            [ring.middleware.cors :refer [wrap-cors]]
             [compojure.core :refer [defroutes GET POST PUT DELETE ANY context]]
             [compojure.route :as route]
             [clj-http.client :as http]
@@ -36,10 +35,14 @@
                           request-opts)
             response (http/request request-opts)]
         
-        {:status (:status response)
-         :headers {"Content-Type" "application/json"
-                   "Access-Control-Allow-Origin" "*"}
-         :body (:body response)})
+        (let [filtered-headers (-> (:headers response)
+                                   (dissoc "access-control-allow-origin")
+                                   (dissoc "access-control-allow-methods")  
+                                   (dissoc "access-control-allow-headers")
+                                   (merge {"Content-Type" "application/json"}))]
+          {:status (:status response)
+           :headers filtered-headers
+           :body (:body response)}))
       
       (catch Exception e
         {:status 500
@@ -54,11 +57,25 @@
   
   (route/not-found {:status 404 :body {:error "Not found"}}))
 
+(defn add-cors-headers [response]
+  (update response :headers merge
+          {"Access-Control-Allow-Origin" "http://localhost:8080"
+           "Access-Control-Allow-Methods" "GET,POST,PUT,DELETE,OPTIONS"
+           "Access-Control-Allow-Headers" "Content-Type,Authorization"}))
+
+(defn cors-middleware [handler]
+  (fn [request]
+    (if (= :options (:request-method request))
+      {:status 200
+       :headers {"Access-Control-Allow-Origin" "http://localhost:8080"
+                 "Access-Control-Allow-Methods" "GET,POST,PUT,DELETE,OPTIONS"
+                 "Access-Control-Allow-Headers" "Content-Type,Authorization"}}
+      (-> (handler request)
+          add-cors-headers))))
+
 (def app
   (-> app-routes
-      (wrap-cors :access-control-allow-origin [#".*"]
-                 :access-control-allow-methods [:get :post :put :delete :options]
-                 :access-control-allow-headers ["Content-Type" "Authorization"])
+      cors-middleware
       wrap-json-body
       wrap-json-response))
 

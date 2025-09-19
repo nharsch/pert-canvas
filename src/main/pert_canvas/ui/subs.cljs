@@ -163,3 +163,24 @@
      :fitView true
      })
    ))
+
+;; Plan.io subscriptions
+(rf/reg-sub
+ :planio/url
+ (fn [db _]
+   (:planio/url db)))
+
+(rf/reg-sub
+ :planio/loading
+ (fn [db _]
+   (:planio/loading db)))
+
+(rf/reg-sub
+ :planio/last-response
+ (fn [db _]
+   (:planio/last-response db)))
+
+(rf/reg-sub
+ :planio/error
+ (fn [db _]
+   (:planio/error db)))
