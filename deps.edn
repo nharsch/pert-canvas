@@ -1,0 +1,13 @@
+{:paths ["src/backend"]
+ 
+ :deps {ring/ring-core {:mvn/version "1.10.0"}
+        ring/ring-jetty-adapter {:mvn/version "1.10.0"}
+        ring/ring-json {:mvn/version "0.5.1"}
+        compojure/compojure {:mvn/version "1.7.1"}
+        clj-http/clj-http {:mvn/version "3.12.4"}
+        cheshire/cheshire {:mvn/version "5.12.0"}
+        ring-cors/ring-cors {:mvn/version "0.1.13"}}
+ 
+ :aliases {:dev {:extra-paths ["src/dev"]
+                 :extra-deps {nrepl/nrepl {:mvn/version "1.0.0"}}}
+           :run {:main-opts ["-m" "server"]}}}
