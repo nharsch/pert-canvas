@@ -4,7 +4,8 @@
   [:map
    [:id :int]
    [:label :string]
-   [:dependencies [:set :int]]])
+   [:dependencies [:set :int]]
+   [:description {:optional true} :string]])
 
 (def state-tasks
   [:vector state-task])

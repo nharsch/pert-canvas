@@ -240,17 +240,64 @@
        )))
 
 ;; Plan.io URL handling
+(defn add-relations-include
+  "Add includes=relations to query string if not already present"
+  [query-string]
+  (if (str/includes? query-string "include")
+    ;; Already has includes, check if relations is there
+    (if (str/includes? query-string "relations")
+      query-string
+      ;; Add relations to existing includes
+      (str/replace query-string #"include=([^&]*)" "include=$1,relations"))
+    ;; No includes parameter, add it
+    (if (empty? query-string)
+      "?include=relations"
+      (str query-string "&include=relations"))))
+
+(defn normalize-planio-path
+  "Convert regular Plan.io paths to JSON API paths"
+  [path]
+  (cond
+    ;; /issues -> /issues.json
+    (= path "/issues")
+    "/issues.json"
+    
+    ;; /issues/123 -> /issues/123.json  
+    (re-matches #"^/issues/\d+$" path)
+    (str path ".json")
+    
+    ;; /projects -> /projects.json
+    (= path "/projects")
+    "/projects.json"
+    
+    ;; /projects/123 -> /projects/123.json
+    (re-matches #"^/projects/\d+$" path)
+    (str path ".json")
+    
+    ;; Already has .json extension, leave as-is
+    (str/includes? path ".json")
+    path
+    
+    ;; Other paths, assume they need .json
+    :else
+    (if (str/includes? path ".")
+      path  ; Already has an extension, leave it
+      (str path ".json"))))
+
 (defn extract-path-from-planio-url 
-  "Extract the path from a full Plan.io URL for API calls"
+  "Extract the path from a full Plan.io URL for API calls and ensure relations are included"
   [url]
   (try
     (let [url-obj (js/URL. url)
           path (.-pathname url-obj)
-          search (.-search url-obj)]
-      (str path search))
+          search (.-search url-obj)
+          normalized-path (normalize-planio-path path)
+          enhanced-search (add-relations-include search)]
+      (str normalized-path enhanced-search))
     (catch js/Error _
       ;; If it's not a valid URL, assume it's already a path
-      url)))
+      (let [normalized-path (normalize-planio-path url)]
+        (add-relations-include normalized-path)))))
 
 (rf/reg-event-db
  :planio/set-url
@@ -295,3 +342,69 @@
    (-> db
        (assoc :planio/loading false)
        (assoc :planio/error error))))
+
+;; Plan.io to PERT conversion
+(defn extract-all-relations
+  "Extract all relations from all issues in the response"
+  [issues]
+  (mapcat :relations issues))
+
+(defn build-dependencies-map
+  "Build a map of issue-id -> set of dependency issue-ids from relations"
+  [all-relations]
+  (reduce (fn [deps-map relation]
+            (if (= (:relation_type relation) "blocks")
+              (let [dependency (:issue_id relation)     ; Issue that blocks
+                    dependent (:issue_to_id relation)]  ; Issue that is blocked
+                ;; dependent depends on dependency
+                (update deps-map dependent (fnil conj #{}) dependency))
+              deps-map))
+          {}
+          all-relations))
+
+(defn planio-issue->pert-task
+  "Convert a Plan.io issue to PERT task format"
+  [issue dependencies-map]
+  {:id (:id issue)
+   :label (str (:subject issue))  ; Ensure it's a string
+   :description (str (or (:description issue) ""))  ; Ensure it's a string, handle nil
+   :dependencies (get dependencies-map (:id issue) #{})})
+
+(defn planio-response->pert-tasks
+  "Convert a Plan.io issues response to PERT tasks format"
+  [response-data]
+  (when-let [issues (:issues response-data)]
+    (let [all-relations (extract-all-relations issues)
+          dependencies-map (build-dependencies-map all-relations)
+          issue-ids (set (map :id issues))
+          ;; Filter dependencies to only include issues that exist in this result set
+          filtered-deps-map (into {} 
+                                  (map (fn [[issue-id deps]]
+                                         [issue-id (set (filter issue-ids deps))])
+                                       dependencies-map))]
+      ;; Use vec to ensure we return a vector, not a lazy sequence
+      (vec (map #(planio-issue->pert-task % filtered-deps-map) issues)))))
+
+(rf/reg-event-fx
+ :planio/convert-to-pert-tasks
+ (fn [{:keys [db]} _]
+   (if-let [response-data (:planio/last-response db)]
+     (let [pert-tasks (planio-response->pert-tasks response-data)]
+       (println "Converted to PERT tasks:" (count pert-tasks) "tasks")
+       {:fx [[:dispatch [:tasks/import-from-planio pert-tasks]]]})
+     (println "No Plan.io response data to convert"))))
+
+(rf/reg-event-db
+ :tasks/import-from-planio
+ (undoable "import tasks from Plan.io")
+ (fn [db [_ imported-tasks]]
+   (println "Importing tasks:" (count imported-tasks) "tasks")
+   (println "First task sample:" (first imported-tasks))
+   (if (m/validate state-tasks imported-tasks)
+     (do
+       (println "Tasks validated successfully, importing...")
+       (assoc db :app/tasks imported-tasks))
+     (do
+       (println "Plan.io import validation errors:")
+       (println (m/explain state-tasks imported-tasks))
+       db))))

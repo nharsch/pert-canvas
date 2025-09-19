@@ -59,7 +59,18 @@
        
        (when last-response
          ($ :div {:style {:margin-top "10px" :color "#28a745"}}
-            ($ :div "✓ Data fetched successfully!")
+            ($ :div {:style {:display "flex" :align-items "center" :gap "10px"}}
+               ($ :span "✓ Data fetched successfully!")
+               ($ :button
+                  {:onClick #(rf/dispatch [:planio/convert-to-pert-tasks])
+                   :style {:padding "4px 8px"
+                           :background "#28a745"
+                           :color "white"
+                           :border "none"
+                           :border-radius "4px"
+                           :cursor "pointer"
+                           :font-size "12px"}}
+                  "Import to PERT"))
             ($ :details
                ($ :summary {:style {:cursor "pointer"}} "View raw response")
                ($ :pre {:style {:background "#f8f9fa" :padding "10px" :overflow "auto" :max-height "200px"}}
