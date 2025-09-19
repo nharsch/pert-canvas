@@ -18,13 +18,11 @@
             ))
 
 
-;; Re-frame events and subscriptions
 (defn handle-row-update [js-row]
   ;; TODO: validate row before dispatching
   (let [row (-> js-row
                 (js->clj :keywordize-keys true)
                 (update :dependencies set))]
-    ;; (println "handle-row-update" row)
     (rf/dispatch [:ui/update-row row])
     (clj->js row)))
 
@@ -67,27 +65,33 @@
         last-undo (last (urf/use-subscribe [:undo-explanations]))
         last-redo (first (urf/use-subscribe [:redo-explanations]))]
 
-    ;; (uix/use-effect  ; delete key handling
-    ;;  (fn []
-    ;;    (let [handle-keydown
-    ;;          (fn [event]
-    ;;            (let [meta-key (or (.-metaKey event) (.-ctrlKey event))]
-    ;;                                     ; undo / redo
-    ;;              (when (and meta-key (= (.-key event) "z"))
-    ;;                (do (.preventDefault event) (rf/dispatch [:undo])))
-    ;;              (when (and meta-key (= (.-key event) "Z"))
-    ;;                (do (.preventDefault event) (rf/dispatch [:redo])))
-    ;;                                     ; delete / backspace
-    ;;              (when (or (= (.-key event) "Delete")
-    ;;                        (= (.-key event) "Backspace"))
-    ;;                (cond (not editing?)
-    ;;                      (do
-    ;;                        (rf/dispatch [:ui/delete-selected])
-    ;;                        (.preventDefault event))))))]
-    ;;      (.addEventListener js/document "keydown" handle-keydown)
-    ;;      ;; Cleanup function
-    ;;      #(.removeEventListener js/document "keydown" handle-keydown)))
-    ;;  [editing?])
+    (uix/use-effect  ; delete key handling
+     (fn []
+       (let [handle-keydown
+             (fn [event]
+               (let [meta-key (or (.-metaKey event) (.-ctrlKey event))
+                     target (.-target event)
+                     target-tag (when target (str/lower-case (.-tagName target)))
+                     is-input-field (or (= target-tag "input")
+                                        (= target-tag "textarea")
+                                        (.-contentEditable target))]
+                 ; undo / redo
+                 (when (and meta-key (= (.-key event) "z"))
+                   (do (.preventDefault event) (rf/dispatch [:undo])))
+                 (when (and meta-key (= (.-key event) "Z"))
+                   (do (.preventDefault event) (rf/dispatch [:redo])))
+                 ; delete / backspace - only when not in input fields and not editing
+                 (when (and (or (= (.-key event) "Delete")
+                               (= (.-key event) "Backspace"))
+                           (not editing?)
+                           (not is-input-field))
+                   (do
+                     (rf/dispatch [:ui/delete-selected])
+                     (.preventDefault event)))))]
+         (.addEventListener js/document "keydown" handle-keydown)
+         ; Cleanup function
+         #(.removeEventListener js/document "keydown" handle-keydown)))
+     [editing?])
 
     ($ :div
        {:on-drag-enter (fn [e]
