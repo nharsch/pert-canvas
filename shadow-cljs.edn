@@ -14,6 +14,7 @@
   [metosin/malli "0.19.1"]
   [cljs-http "0.1.48"]
   [semantic-csv "0.2.1-alpha1"]
+  [datascript "1.7.3"]
   ]
  :js-options {:resolve {"@xyflow/react/dist/style.css" {:target :file
                                                         :file "node_modules/@xyflow/react/dist/style.css"}}}

@@ -8,12 +8,15 @@
             [clojure.string :as str]
             [clojure.edn :as edn]))
 
+
+;; TODO: use log in flow instead
 (def secrets (edn/read-string (slurp ".secret")))
 
 (def planio-config
   {:base-url (get-in secrets [:planio :base-url])
    :auth [(get-in secrets [:planio :username])
           (get-in secrets [:planio :password])]})
+
 
 (defn proxy-to-planio [request path]
   (let [method (:request-method request)

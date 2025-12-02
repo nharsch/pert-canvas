@@ -1,4 +1,5 @@
-(ns pert-canvas.ui.state)
+(ns pert-canvas.ui.state
+  (:require [pert-canvas.ui.db :as db]))
 
 (def state-task
   [:map
@@ -38,8 +39,9 @@
    ])
 
 (def initial-state
-  {
-   :app/tasks initial-tasks
+  {;; DataScript connection for task data
+   :ds/conn (db/create-conn)
+   ;; UI state remains as plain maps
    :app/selected-task nil
    :app/selected-edge nil
    })

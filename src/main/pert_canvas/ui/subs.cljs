@@ -1,7 +1,9 @@
 (ns pert-canvas.ui.subs
     (:require
      [re-frame.core :as rf]
-     [pert-canvas.utils :refer [get-layouted-nodes state-task->canvas-node]]))
+     [datascript.core :as d]
+     [pert-canvas.utils :refer [get-layouted-nodes state-task->canvas-node]]
+     [pert-canvas.ui.db :as db]))
 
 (defn handle-nodes-change [nodes]
   ;; only handle dimension calcs
@@ -49,6 +51,17 @@
   (->> nodes
        (filter #(= name (:label %)))
        (first)))
+
+(rf/reg-sub
+ :ds/db
+ (fn [db _]
+   @(:ds/conn db)))
+
+(rf/reg-sub
+ :app/tasks
+ :<- [:ds/db]
+ (fn [ds-db _]
+   (db/all-tasks ds-db)))
 
 (rf/reg-sub
  :datagrid/rows
@@ -105,11 +118,6 @@
    ;; (println "sub :app/selected-edge")
    (:app/selected-edge db)))
 
-(rf/reg-sub
- :app/tasks
- (fn [db _]
-   ;; (println "sub :app/tasks")
-   (:app/tasks db)))
 
 (rf/reg-sub
  :ui/editing-text
@@ -124,10 +132,10 @@
 
 (rf/reg-sub
  :reactflow/edges
- :<- [:app/tasks]
- (fn [tasks _]
+ :<- [:ds/db]
+ (fn [ds-db _]
    ;; (println ":reactflow/edges")
-   (tasks->canvas-edges tasks)))
+   (db/task-edges ds-db)))
 
 (rf/reg-sub
  :reactflow/layouted-nodes

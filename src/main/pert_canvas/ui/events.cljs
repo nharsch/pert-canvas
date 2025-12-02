@@ -8,36 +8,32 @@
    [goog.labs.format.csv :as csv]
    [malli.core :as m]
    [malli.error :as me]
+   [datascript.core :as d]
    [pert-canvas.utils :refer [keywordize-values
                               csv->tasks
                               remove-dep-from-row
                               edgeid->ids]]
    [pert-canvas.ui.state :refer [initial-state state-task state-tasks]]
+   [pert-canvas.ui.db :as db]
    [redmine.api :as redmine])
   (:require-macros [cljs.core.async.macros :refer [go]]))
 
 
-;; TODO: move to a separate state namespace?
-(defn delete-task-from-db
-  [db task-id]
-  ;; (println "delete-task" task-id)
-  (let [new-tasks
-        (update db :app/tasks
-                (fn [tasks]
-                  (remove #(= (:id %) (int task-id)) tasks)))]
-    new-tasks))
-
-(defn delete-edge-from-db
-  [db edge-id]
-  ;; (println "delete-edge" edge-id)
-  (let [[source-id target-id] (edgeid->ids edge-id)]
-    (println "source-id" source-id "target-id" target-id)
-    (update-in db [:app/tasks]
-               (fn [tasks]
-                 (map #(if (= (:id %) source-id)
-                         (do
-                           (remove-dep-from-row target-id %))
-                         %) tasks)))))
+;; Helper function to transact to DataScript and update conn in db
+(defn ds-transact!
+  "Transact to DataScript connection and return updated db.
+   For undo/redo to work properly, we need to replace the conn with a new one
+   containing the transacted DB value, rather than mutating the existing conn."
+  [db tx-data]
+  (let [conn (:ds/conn db)
+        old-db-val @conn
+        ;; Create a temporary conn to get the new db value
+        temp-conn (d/conn-from-db old-db-val)
+        _ (d/transact! temp-conn tx-data)
+        new-db-val @temp-conn
+        ;; Create a new conn with the new db value
+        new-conn (d/conn-from-db new-db-val)]
+    (assoc db :ds/conn new-conn)))
 
 
 
@@ -105,25 +101,32 @@
  (undoable "create connection")
  (fn [db [_ source-id target-id]]
    (println "create-connection" source-id target-id)
-   (update-in db [:app/tasks]
-              (fn [tasks]
-                (map #(if (= (:id %) (int target-id))
-                        (do
-                          (println "found dep for" target-id source-id)
-                          (update % :dependencies union #{(int source-id)}))
-                        %) tasks)))))
+   (let [tx-data (db/add-dependency-tx (int target-id) (int source-id))]
+     (ds-transact! db tx-data))))
 
 (rf/reg-event-db
  :ui/update-row
  (undoable "update task row")
  (fn [db [_ row]]
    (println "update-row" row)
-   (if
-       (m/validate state-task row)
-       (update-in db [:app/tasks]
-                  (fn [tasks]
-                    (map #(if (= (:id %) (:id row)) row %) tasks)))
-       (println (:errors (m/explain state-task row))))))
+   (if (m/validate state-task row)
+     (let [conn (:ds/conn db)
+           ds-db @conn
+           ;; Get current task to find what changed
+           current-deps (get (db/task-by-id ds-db (:id row)) :dependencies #{})
+           new-deps (:dependencies row)
+           ;; Update basic fields
+           update-tx (db/update-task-tx (:id row) row)
+           ;; Handle dependency changes
+           deps-to-add (clojure.set/difference new-deps current-deps)
+           deps-to-remove (clojure.set/difference current-deps new-deps)
+           add-dep-txs (mapv #(db/add-dependency-tx (:id row) %) deps-to-add)
+           remove-dep-txs (mapcat #(db/remove-dependency-tx ds-db (:id row) %) deps-to-remove)
+           all-tx-data (concat update-tx add-dep-txs remove-dep-txs)]
+       (ds-transact! db all-tx-data))
+     (do
+       (println (:errors (m/explain state-task row)))
+       db))))
 
 (rf/reg-event-db
  :reactflow/nodes-dims-calc
@@ -136,14 +139,22 @@
  (fn [db _]
    ;; (println "delete-selected" (:app/selected-task db) (:app/selected-edge db))
    (let [selected-task (:app/selected-task db)
-         selected-edge (:app/selected-edge db)]
+         selected-edge (:app/selected-edge db)
+         ds-db @(:ds/conn db)]
      (cond
-       selected-task (-> db
-                         (delete-task-from-db selected-task)
-                         (assoc :app/selected-task nil))
-       selected-edge (-> db
-                         (delete-edge-from-db selected-edge)
-                         (assoc :app/selected-edge nil))
+       selected-task
+       (let [tx-data (db/delete-task-tx ds-db selected-task)]
+         (-> db
+             (ds-transact! tx-data)
+             (assoc :app/selected-task nil)))
+
+       selected-edge
+       (let [[dep-id target-id] (edgeid->ids selected-edge)
+             tx-data (db/remove-dependency-tx ds-db target-id dep-id)]
+         (-> db
+             (ds-transact! tx-data)
+             (assoc :app/selected-edge nil)))
+
        :else db))))
 
 (rf/reg-event-db
@@ -151,13 +162,13 @@
  (undoable "add task")
  (fn [db _]
    ;; (println "add-task")
-   (let [new-id (inc (count (:app/tasks db)))
-         new-task {:id new-id
-                   :label (str "Node " new-id)
-                   :description (str "Node " new-id " description")
-                   :dependencies #{}}]
+   (let [ds-db @(:ds/conn db)
+         new-id (db/next-task-id ds-db)
+         tx-data (db/add-task-tx ds-db
+                                 (str "Node " new-id)
+                                 (str "Node " new-id " description"))]
      (-> db
-         (update-in [:app/tasks] conj new-task)
+         (ds-transact! tx-data)
          (assoc :app/selected-task new-id)))))
 
 (rf/reg-event-db
@@ -230,14 +241,15 @@
  :tasks/import-from-csv
  (undoable "import tasks from CSV")
  (fn [db [_ imported-tasks]]
-   (if
-       (m/validate state-tasks imported-tasks)
-       ;; Merge with existing tasks or replace - adjust based on your needs
-       (assoc db :app/tasks imported-tasks)
+   (if (m/validate state-tasks imported-tasks)
+     (let [ds-db @(:ds/conn db)
+           tx-data (db/replace-all-tasks-tx ds-db imported-tasks)]
+       (ds-transact! db tx-data))
+     (do
        ;; TODO: throw error ealier if possible (during modal open)
        ;; TODO: toast error or some alert
        (println "CSV import errors: " (:errors (m/explain state-tasks imported-tasks)))
-       )))
+       db))))
 
 ;; Plan.io URL handling
 (defn add-relations-include
@@ -403,7 +415,9 @@
    (if (m/validate state-tasks imported-tasks)
      (do
        (println "Tasks validated successfully, importing...")
-       (assoc db :app/tasks imported-tasks))
+       (let [ds-db @(:ds/conn db)
+             tx-data (db/replace-all-tasks-tx ds-db imported-tasks)]
+         (ds-transact! db tx-data)))
      (do
        (println "Plan.io import validation errors:")
        (println (m/explain state-tasks imported-tasks))
